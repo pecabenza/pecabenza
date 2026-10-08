@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const migrationsDir = path.resolve('e:/projetos/sysfood/supabase/migrations');
-const outputFile = path.resolve('e:/projetos/sysfood/supabase/staging_bundle.sql');
+const migrationsDir = path.resolve(process.cwd(), 'supabase/migrations');
+const outputFile = path.resolve(process.cwd(), 'supabase/staging_bundle.sql');
 
 const files = [
   '00001_multi_tenant_foundation.sql',

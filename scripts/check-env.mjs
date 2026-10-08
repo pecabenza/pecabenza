@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const envPath = path.resolve('e:/projetos/sysfood/.env.local');
+const envPath = path.resolve(process.cwd(), '.env.local');
 
 if (!fs.existsSync(envPath)) {
   console.log(JSON.stringify({ exists: false }));
