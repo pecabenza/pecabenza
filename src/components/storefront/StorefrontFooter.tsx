@@ -120,7 +120,7 @@ export function StorefrontFooter({ tenant, settings }: StorefrontFooterProps) {
             &copy; {currentYear} {tenant.name}. Todos os direitos reservados.
           </p>
           <p className="flex items-center gap-1">
-            <span>Presença digital provida com tecnologia SaaS</span>
+            <span>Pratos preparados e porcionados para o seu dia a dia.</span>
           </p>
         </div>
       </Container>

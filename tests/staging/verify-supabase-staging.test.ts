@@ -30,7 +30,7 @@ describe.skipIf(!isConfigured)('Validação em Supabase Staging Real', () => {
   let anonClient: SupabaseClient<any, 'public', any>;
 
   const TENANT_BENZA_ID = '00000000-0000-0000-0000-000000000001';
-  const TENANT_02_ID = 'a2222222-2222-2222-2222-222222222222';
+  const TENANT_02_ID = '00000000-0000-0000-0000-000000000002';
 
   beforeAll(() => {
     adminClient = createClient(supabaseUrl, serviceRoleKey || anonKey);
@@ -95,8 +95,8 @@ describe.skipIf(!isConfigured)('Validação em Supabase Staging Real', () => {
       .from('audit_logs')
       .insert({
         tenant_id: TENANT_BENZA_ID,
-        entity_name: 'test_homologation',
-        entity_id: '00000000-0000-0000-0000-000000000000',
+        resource_type: 'test_homologation',
+        resource_id: '00000000-0000-0000-0000-000000000000',
         action: 'HOMOLOGATION_PROBE',
         payload_after: { stage: '1B_staging' },
       })
