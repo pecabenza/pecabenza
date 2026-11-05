@@ -1,5 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { normalizeHostname, resolveTenantByHost, clearTenantCache } from '@/lib/tenancy/context';
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: vi.fn(() => ({
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+          })),
+        })),
+      })),
+    })),
+  })),
+}));
 
 describe('Resolução de Tenant e Isolamento de Domínio', () => {
   const originalEnv = process.env.NODE_ENV;

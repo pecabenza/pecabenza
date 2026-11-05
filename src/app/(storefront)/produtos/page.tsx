@@ -11,6 +11,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { generateBreadcrumbJsonLd } from '@/lib/seo/schema';
+import { QuickAddToCartButton } from '@/components/cart/QuickAddToCartButton';
 
 export async function generateMetadata(): Promise<Metadata> {
   const headersList = await headers();
@@ -129,15 +130,16 @@ export default async function ProductsPage() {
                     </div>
                   )}
 
-                  {/* Ação */}
-                  <div className="pt-2">
+                  {/* Ações */}
+                  <div className="pt-2 flex items-center gap-2">
                     <Link
                       href={`/produtos/${product.slug}`}
-                      className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 rounded-tenant bg-tenant-surface border border-tenant-border text-tenant-text text-sm font-semibold hover:border-tenant-primary hover:text-tenant-primary transition-all group"
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-tenant bg-tenant-surface border border-tenant-border text-tenant-text text-xs font-semibold hover:border-tenant-primary hover:text-tenant-primary transition-all group"
                     >
-                      <span>Ver Ficha Completa</span>
-                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      <span>Ficha Completa</span>
+                      <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                     </Link>
+                    <QuickAddToCartButton product={product} />
                   </div>
                 </div>
               </Card>

@@ -164,11 +164,17 @@ export async function getTenantProducts(tenantId: string): Promise<Product[]> {
       .order('is_featured', { ascending: false });
 
     if (error || !data || data.length === 0) {
-      return MOCK_PRODUCTS;
+      if (tenantId === '00000000-0000-0000-0000-000000000001') {
+        return MOCK_PRODUCTS;
+      }
+      return [];
     }
     return data as Product[];
   } catch {
-    return MOCK_PRODUCTS;
+    if (tenantId === '00000000-0000-0000-0000-000000000001') {
+      return MOCK_PRODUCTS;
+    }
+    return [];
   }
 }
 
@@ -184,12 +190,18 @@ export async function getTenantProductBySlug(tenantId: string, slug: string): Pr
       .maybeSingle();
 
     if (error || !data) {
-      const found = MOCK_PRODUCTS.find((p) => p.slug === slug);
-      return found || null;
+      if (tenantId === '00000000-0000-0000-0000-000000000001') {
+        const found = MOCK_PRODUCTS.find((p) => p.slug === slug);
+        return found || null;
+      }
+      return null;
     }
     return data as Product;
   } catch {
-    const found = MOCK_PRODUCTS.find((p) => p.slug === slug);
-    return found || null;
+    if (tenantId === '00000000-0000-0000-0000-000000000001') {
+      const found = MOCK_PRODUCTS.find((p) => p.slug === slug);
+      return found || null;
+    }
+    return null;
   }
 }

@@ -19,11 +19,16 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+const isStagingRun = process.argv.some((arg) => arg.includes('staging'));
+
 export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
     testTimeout: 25000,
+    include: isStagingRun
+      ? ['tests/staging/**/*.test.ts']
+      : ['tests/unit/**/*.test.ts', 'tests/security/**/*.test.ts'],
   },
   resolve: {
     alias: {

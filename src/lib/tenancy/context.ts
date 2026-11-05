@@ -14,7 +14,7 @@ export const DEFAULT_DEV_CONTEXT: TenantFullContext = {
     name: 'BENZA',
     slug: 'benza',
     status: 'active',
-    site_mode: 'prelaunch',
+    site_mode: 'commerce',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -58,8 +58,8 @@ export const DEFAULT_DEV_CONTEXT: TenantFullContext = {
   },
   branding: {
     tenant_id: '00000000-0000-0000-0000-000000000001',
-    logo_url: null,
-    favicon_url: null,
+    logo_url: '/assets/brands/benza/logo-primary.svg',
+    favicon_url: '/assets/brands/benza/favicon.svg',
     font_family_heading: 'Playfair Display',
     font_family_body: 'Plus Jakarta Sans',
     color_primary: '#A84B2C',
@@ -69,6 +69,20 @@ export const DEFAULT_DEV_CONTEXT: TenantFullContext = {
     color_surface: '#FFFFFF',
     color_text: '#1C1917',
     border_radius: '0.75rem',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  commerceSettings: {
+    tenant_id: '00000000-0000-0000-0000-000000000001',
+    delivery_enabled: true,
+    pickup_enabled: true,
+    fixed_delivery_fee_cents: 1200,
+    free_delivery_threshold_cents: null,
+    min_order_value_cents: 3000,
+    asap_enabled: true,
+    scheduled_enabled: true,
+    estimated_delivery_time_min: 60,
+    estimated_pickup_time_min: 30,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -152,11 +166,12 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
     const tenantId = domainData.tenant_id;
 
     // 2.3 Carregar dados completos do tenant associado
-    const [tenantRes, domainsRes, settingsRes, brandingRes] = await Promise.all([
+    const [tenantRes, domainsRes, settingsRes, brandingRes, commerceRes] = await Promise.all([
       supabase.from('tenants').select('*').eq('id', tenantId).single(),
       supabase.from('tenant_domains').select('*').eq('tenant_id', tenantId),
       supabase.from('tenant_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
       supabase.from('tenant_branding').select('*').eq('tenant_id', tenantId).maybeSingle(),
+      supabase.from('tenant_commerce_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
     ]);
 
     if (!tenantRes.data || tenantRes.data.status !== 'active') {
@@ -168,6 +183,7 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
       domains: domainsRes.data || [],
       settings: settingsRes.data || DEFAULT_DEV_CONTEXT.settings,
       branding: brandingRes.data || DEFAULT_DEV_CONTEXT.branding,
+      commerceSettings: commerceRes.data || DEFAULT_DEV_CONTEXT.commerceSettings,
     };
 
     tenantCache.set(hostname, { data: fullContext, timestamp: Date.now() });

@@ -38,26 +38,14 @@ describe('Segurança de Cabeçalhos: Content-Security-Policy (CSP) & HSTS', () =
       expect(csp).toContain('wss://*.supabase.co');
     });
 
-    it('deve estender CSP estritamente para Cloudinary apenas quando explicitamente habilitado', () => {
-      const cspWithCloudinary = buildContentSecurityPolicy({
-        includeCloudinary: true,
+    it('deve confirmar que Cloudinary e gateways futuros permanecem ausentes do CSP ativo', () => {
+      const csp = buildContentSecurityPolicy({
         isProduction: true,
       });
 
-      expect(cspWithCloudinary).toContain('https://res.cloudinary.com');
-    });
-
-    it('deve estender CSP estritamente para gateways de pagamento homologados apenas quando configurado', () => {
-      const cspWithGateways = buildContentSecurityPolicy({
-        paymentGateways: ['stripe', 'mercadopago'],
-        isProduction: true,
-      });
-
-      expect(cspWithGateways).toContain('https://js.stripe.com');
-      expect(cspWithGateways).toContain('https://api.stripe.com');
-      expect(cspWithGateways).toContain('https://sdk.mercadopago.com');
-      expect(cspWithGateways).toContain('https://api.mercadopago.com');
-      expect(cspWithGateways).toContain('https://www.mercadopago.com');
+      expect(csp).not.toContain('https://res.cloudinary.com');
+      expect(csp).not.toContain('https://js.stripe.com');
+      expect(csp).not.toContain('https://sdk.mercadopago.com');
     });
   });
 

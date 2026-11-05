@@ -177,7 +177,7 @@ export async function getTenantPageWithSections(tenantId: string, slug: string):
       .maybeSingle();
 
     if (pageError || !pageData) {
-      if (slug === 'home') {
+      if (slug === 'home' && tenantId === '00000000-0000-0000-0000-000000000001') {
         return {
           id: 'page-home',
           tenant_id: tenantId,
@@ -209,7 +209,7 @@ export async function getTenantPageWithSections(tenantId: string, slug: string):
       sections: sectionsData || [],
     };
   } catch {
-    if (slug === 'home') {
+    if (slug === 'home' && tenantId === '00000000-0000-0000-0000-000000000001') {
       return {
         id: 'page-home',
         tenant_id: tenantId,
@@ -238,47 +238,50 @@ export async function getTenantPages(tenantId: string): Promise<TenantPage[]> {
       .eq('tenant_id', tenantId);
 
     if (error || !data || data.length === 0) {
-      return [
-        {
-          id: 'page-home',
-          tenant_id: tenantId,
-          slug: 'home',
-          title: 'Página Inicial',
-          meta_title: 'BENZA — Pratos Prontos Congelados',
-          meta_description: 'Pratos preparados e congelados para aquecer e servir no seu dia a dia.',
-          og_media_id: null,
-          status: 'published',
-          published_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          id: 'page-sobre',
-          tenant_id: tenantId,
-          slug: 'sobre',
-          title: 'Nossa Proposta',
-          meta_title: 'Nossa Proposta | BENZA',
-          meta_description: 'A dedicação e o cuidado por trás de cada prato preparado pela BENZA.',
-          og_media_id: null,
-          status: 'published',
-          published_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          id: 'page-produtos',
-          tenant_id: tenantId,
-          slug: 'produtos',
-          title: 'Cardápio de Pratos',
-          meta_title: 'Cardápio de Pratos | BENZA',
-          meta_description: 'Conheça nosso cardápio de pratos preparados e porcionados da BENZA.',
-          og_media_id: null,
-          status: 'published',
-          published_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ];
+      if (tenantId === '00000000-0000-0000-0000-000000000001') {
+        return [
+          {
+            id: 'page-home',
+            tenant_id: tenantId,
+            slug: 'home',
+            title: 'Página Inicial',
+            meta_title: 'BENZA — Pratos Prontos Congelados',
+            meta_description: 'Pratos preparados e congelados para aquecer e servir no seu dia a dia.',
+            og_media_id: null,
+            status: 'published',
+            published_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: 'page-sobre',
+            tenant_id: tenantId,
+            slug: 'sobre',
+            title: 'Nossa Proposta',
+            meta_title: 'Nossa Proposta | BENZA',
+            meta_description: 'A dedicação e o cuidado por trás de cada prato preparado pela BENZA.',
+            og_media_id: null,
+            status: 'published',
+            published_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            id: 'page-produtos',
+            tenant_id: tenantId,
+            slug: 'produtos',
+            title: 'Cardápio de Pratos',
+            meta_title: 'Cardápio de Pratos | BENZA',
+            meta_description: 'Conheça nosso cardápio de pratos preparados e porcionados da BENZA.',
+            og_media_id: null,
+            status: 'published',
+            published_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ];
+      }
+      return [];
     }
 
     return data;

@@ -11,11 +11,11 @@ export const dynamic = 'force-dynamic';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB máximo
 
+// Formatos seguros para upload de usuários (SVG desabilitado para prevenir Stored XSS)
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/png',
   'image/webp',
-  'image/svg+xml',
   'image/x-icon',
 ];
 
@@ -24,7 +24,7 @@ const DISALLOWED_EXTENSIONS = new Set([
   '.ts', '.py', '.pl', '.rb', '.jar', '.vbs', '.scr', '.msi', '.com', '.bin'
 ]);
 
-const VALID_CATEGORIES = ['branding', 'products', 'pages', 'general'] as const;
+const VALID_CATEGORIES = ['logo', 'hero', 'products', 'general'] as const;
 type UploadCategory = typeof VALID_CATEGORIES[number];
 
 export async function POST(request: NextRequest) {
@@ -126,6 +126,11 @@ export async function POST(request: NextRequest) {
     const storagePath = `${tenantId}/${category}/${filename}`;
 
     // 5. Integração com Supabase Storage (Staging / Produção)
+    const isProductionOrStaging =
+      process.env.APP_ENV === 'staging' ||
+      process.env.APP_ENV === 'production' ||
+      process.env.NODE_ENV === 'production';
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const hasSupabaseCredentials =
@@ -165,6 +170,12 @@ export async function POST(request: NextRequest) {
             is_private: false,
           });
 
+          logger.info('Arquivo salvo com sucesso no Supabase Storage', {
+            tenantId,
+            storagePath,
+            size: file.size,
+          });
+
           return NextResponse.json({
             success: true,
             url: publicUrl,
@@ -178,13 +189,41 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        console.warn('[Storage Staging Notice]: Falha no bucket remoto, aplicando fallback local.', uploadError);
-      } catch (storageErr) {
-        console.warn('[Storage Staging Exception]: Erro de conexão com Supabase Storage, aplicando fallback local.', storageErr);
+        logger.error('Falha no upload para o Supabase Storage', {
+          tenantId,
+          storagePath,
+          error: uploadError.message,
+        });
+
+        // Em ambientes de staging ou produção, NUNCA executa fallback para disco local
+        if (isProductionOrStaging) {
+          return NextResponse.json(
+            { error: 'Não foi possível salvar o arquivo no armazenamento em nuvem. Tente novamente mais tarde.' },
+            { status: 502 }
+          );
+        }
+      } catch (storageErr: any) {
+        logger.error('Exceção ao comunicar com o Supabase Storage', {
+          tenantId,
+          error: storageErr?.message,
+        });
+
+        if (isProductionOrStaging) {
+          return NextResponse.json(
+            { error: 'Serviço de armazenamento indisponível temporariamente.' },
+            { status: 502 }
+          );
+        }
       }
+    } else if (isProductionOrStaging) {
+      logger.error('Tentativa de upload sem credenciais válidas do Supabase Storage em ambiente controlado', { tenantId });
+      return NextResponse.json(
+        { error: 'Serviço de armazenamento não configurado para este ambiente.' },
+        { status: 500 }
+      );
     }
 
-    // 6. Fallback de Desenvolvimento Local (Exclusivo para dev sem Supabase remoto)
+    // 6. Fallback de Desenvolvimento Local (EXCLUSIVO para desenvolvimento offline/sem banco remoto)
     const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
     await mkdir(uploadsDir, { recursive: true });
 
@@ -204,7 +243,7 @@ export async function POST(request: NextRequest) {
       mimeType: file.type,
       size: file.size,
       tenantId,
-      notice: 'Armazenado em fallback local. Em produção/staging, Supabase Storage será utilizado automaticamente.',
+      notice: 'Armazenado em fallback local exclusivo para desenvolvimento.',
     });
   } catch (error: any) {
     return createSafeErrorResponse(error, 500, { action: 'upload_file' });

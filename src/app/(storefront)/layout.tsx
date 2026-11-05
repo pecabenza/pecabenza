@@ -6,6 +6,9 @@ import { StorefrontHeader } from '@/components/storefront/StorefrontHeader';
 import { StorefrontFooter } from '@/components/storefront/StorefrontFooter';
 import { CookieConsentBanner } from '@/components/common/CookieConsentBanner';
 import { GoogleAnalytics } from '@/components/common/GoogleAnalytics';
+import { CartProvider } from '@/modules/cart/CartContext';
+import { CartDrawer } from '@/components/cart/CartDrawer';
+import { FloatingCartBar } from '@/components/cart/FloatingCartBar';
 import '@/app/globals.css';
 
 export const dynamic = 'force-dynamic';
@@ -68,13 +71,17 @@ export default async function StorefrontLayout({
       </head>
       <body className="min-h-screen flex flex-col bg-tenant-background text-tenant-text antialiased selection:bg-tenant-primary selection:text-white">
         <GoogleAnalytics measurementId={settings.ga4_measurement_id} />
-        {tenant.site_mode === 'prelaunch' && (
-          <PrelaunchBanner bannerText={settings.prelaunch_banner_text} />
-        )}
-        <StorefrontHeader tenant={tenant} branding={branding} settings={settings} />
-        <main className="flex-1">{children}</main>
-        <StorefrontFooter tenant={tenant} settings={settings} />
-        <CookieConsentBanner />
+        <CartProvider tenantId={tenant.id} tenantSlug={tenant.slug}>
+          {tenant.site_mode === 'prelaunch' && (
+            <PrelaunchBanner bannerText={settings.prelaunch_banner_text} />
+          )}
+          <StorefrontHeader tenant={tenant} branding={branding} settings={settings} />
+          <main className="flex-1">{children}</main>
+          <StorefrontFooter tenant={tenant} settings={settings} />
+          <CartDrawer />
+          <FloatingCartBar />
+          <CookieConsentBanner />
+        </CartProvider>
       </body>
     </html>
   );

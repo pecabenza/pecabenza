@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveTenantByHost } from '@/lib/tenancy/context';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getTenantPages } from '@/modules/cms/service';
 import { getTenantProducts } from '@/modules/catalog/service';
 import { auditPageSeo, auditTenantSeoConfig, type SeoAuditReport } from '@/lib/seo/audit';
@@ -33,76 +34,82 @@ export async function GET(request: NextRequest) {
     }
 
     const { tenant, settings, branding } = tenantContext;
-    const [pages, products] = await Promise.all([
+    const supabase = createAdminClient();
+
+    const [pages, products, sectionsRes] = await Promise.all([
       getTenantPages(tenant.id),
       getTenantProducts(tenant.id),
+      supabase
+        .from('tenant_page_sections')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .eq('is_active', true)
+        .order('display_order', { ascending: true }),
     ]);
 
+    const allSections = sectionsRes.data || [];
     const tenantAudit = auditTenantSeoConfig(tenant, settings, branding);
     const pageReports: SeoAuditReport[] = [];
 
-    // Auditar Home
-    const homePage = pages.find((p: TenantPage) => p.slug === 'home');
-    pageReports.push(
-      auditPageSeo({
-        url: `https://${host}/`,
-        slug: 'home',
-        title: homePage?.meta_title || `${tenant.name} — Pratos Prontos e Conforto Gastronômico`,
-        metaDescription: homePage?.meta_description || 'Cardápio de pratos preparados e porcionados para aquecer na sua mesa.',
-        canonicalUrl: `https://${host}/`,
-        h1: 'A comodidade da boa comida à sua mesa',
-        content: 'Pratos clássicos preparados com cuidado e prontos para aquecer. Porções sob medida de 500 ml e 1000 ml feitas para a sua rotina.',
-        primaryKeyword: `${tenant.name.toLowerCase()} comida congelada`,
-        searchIntent: 'commercial',
-      })
-    );
+    // Auditar cada página pública do tenant com base no conteúdo real de suas seções
+    for (const page of pages) {
+      const pageSections = allSections.filter((s: any) => s.page_id === page.id);
 
-    // Auditar Cardápio (/produtos)
-    const cardapioPage = pages.find((p: TenantPage) => p.slug === 'produtos');
-    pageReports.push(
-      auditPageSeo({
-        url: `https://${host}/produtos`,
-        slug: 'produtos',
-        title: cardapioPage?.meta_title || `Cardápio de Pratos | ${tenant.name}`,
-        metaDescription: cardapioPage?.meta_description || `Conheça nosso cardápio de pratos preparados e prontos para aquecer da ${tenant.name}.`,
-        canonicalUrl: `https://${host}/produtos`,
-        h1: 'Cardápio de Pratos',
-        content: 'Confira as opções preparadas com ingredientes tradicionais, embalagens forneáveis e congelamento cuidadoso.',
-        primaryKeyword: 'pratos prontos congelados',
-        searchIntent: 'commercial',
-      })
-    );
+      // Extrair H1 dinâmico da primeira seção editorial que possuir título, ou usar o título da página
+      let h1 = page.title;
+      let textContent = '';
+      const pageImages: { src: string; alt?: string }[] = [];
 
-    // Auditar Sobre (/sobre)
-    const sobrePage = pages.find((p: TenantPage) => p.slug === 'sobre');
-    pageReports.push(
-      auditPageSeo({
-        url: `https://${host}/sobre`,
-        slug: 'sobre',
-        title: sobrePage?.meta_title || `Nossa Proposta | ${tenant.name}`,
-        metaDescription: sobrePage?.meta_description || `A dedicação e o cuidado por trás de cada prato preparado pela ${tenant.name}.`,
-        canonicalUrl: `https://${host}/sobre`,
-        h1: 'Nossa Proposta',
-        content: 'Acreditamos que uma refeição prática não precisa abrir mão do cuidado. Nossos pratos unem receitas tradicionais ao conforto da cozinha de verdade.',
-        primaryKeyword: `${tenant.name.toLowerCase()} gastronomia`,
-        searchIntent: 'informational',
-      })
-    );
+      for (const sec of pageSections) {
+        const c = sec.content || {};
+        if (!h1 || h1 === page.title) {
+          if (c.title) h1 = c.title;
+        }
+        if (c.title) textContent += ` ${c.title}.`;
+        if (c.subtitle) textContent += ` ${c.subtitle}.`;
+        if (c.lead_paragraph) textContent += ` ${c.lead_paragraph}.`;
+        if (c.description) textContent += ` ${c.description}.`;
+        if (c.image_url) pageImages.push({ src: c.image_url, alt: c.title || page.title });
+      }
 
-    // Auditar cada prato ativo
+      const pathSuffix = page.slug === 'home' ? '' : page.slug;
+      const pageUrl = `https://${host}/${pathSuffix}`;
+
+      pageReports.push(
+        auditPageSeo({
+          url: pageUrl,
+          slug: page.slug,
+          title: page.meta_title || `${page.title} | ${tenant.name}`,
+          metaDescription: page.meta_description || settings.seo_defaults.default_meta_description || `${page.title} - ${tenant.name}`,
+          canonicalUrl: page.canonical_url || pageUrl,
+          h1: h1 || page.title,
+          content: textContent.trim() || `${page.title} - ${tenant.name}`,
+          primaryKeyword: page.primary_keyword || `${tenant.name.toLowerCase()} ${page.slug}`,
+          searchIntent: page.search_intent || (page.slug === 'produtos' ? 'commercial' : 'informational'),
+          images: pageImages,
+        })
+      );
+    }
+
+    // Auditar cada produto ativo do tenant
     for (const prod of products) {
+      const prodImages: { src: string; alt?: string }[] = [];
+      if (prod.cover_image_url) {
+        prodImages.push({ src: prod.cover_image_url, alt: prod.name });
+      }
+
       pageReports.push(
         auditPageSeo({
           url: `https://${host}/produtos/${prod.slug}`,
           slug: prod.slug,
           title: `${prod.name} | ${tenant.name}`,
-          metaDescription: prod.short_description || prod.full_description || `Prato preparado ${prod.name} pela ${tenant.name}.`,
+          metaDescription: prod.short_description || prod.full_description || `${prod.name} preparado por ${tenant.name}.`,
           canonicalUrl: `https://${host}/produtos/${prod.slug}`,
           h1: prod.name,
-          content: `${prod.short_description || ''} ${prod.full_description || ''} ${prod.information?.ingredients || ''}`,
-          primaryKeyword: prod.name.toLowerCase(),
-          searchIntent: 'transactional',
-          images: prod.cover_image_url ? [{ src: prod.cover_image_url, alt: prod.name }] : [],
+          content: `${prod.short_description || ''} ${prod.full_description || ''} ${prod.information?.ingredients || ''}`.trim() || prod.name,
+          primaryKeyword: prod.primary_keyword || prod.name.toLowerCase(),
+          searchIntent: prod.search_intent || 'transactional',
+          images: prodImages,
         })
       );
     }

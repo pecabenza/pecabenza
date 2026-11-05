@@ -9,12 +9,21 @@ export type AnalyticsEventName =
   | 'contact_click'
   | 'whatsapp_click'
   | 'lead_submit'
-  // Eventos futuros preparados para a fase da Loja Virtual:
+  // Eventos de E-Commerce e Checkout
+  | 'view_cart'
   | 'add_to_cart'
+  | 'remove_from_cart'
   | 'begin_checkout'
+  | 'checkout_validation_error'
+  | 'shipping_info_added'
+  | 'order_created'
   | 'purchase'
   | 'coupon_apply'
-  | 'delivery_selected';
+  | 'delivery_selected'
+  // Eventos de Acompanhamento e Operação de Pedidos (Etapa 2C)
+  | 'order_status_viewed'
+  | 'order_status_updated'
+  | 'order_delivered';
 
 export interface AnalyticsEventParams {
   tenantId?: string;

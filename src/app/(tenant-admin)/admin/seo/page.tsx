@@ -35,14 +35,31 @@ export default function AdminSeoPage() {
 
   const [activeTab, setActiveTab] = useState<'audit' | 'settings'>('audit');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Estados de Configuração de Tags e Palavras-chave
   const [seoSettings, setSeoSettings] = useState({
-    primaryKeyword: 'comida congelada em porções',
+    primaryKeyword: 'refeições práticas porcionadas',
     searchIntent: 'commercial',
     ga4Id: '',
     gscTag: '',
   });
+
+  const loadSeoSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/seo');
+      if (res.ok) {
+        const data = await res.json();
+        setSeoSettings((prev) => ({
+          ...prev,
+          ga4Id: data.ga4Id || '',
+          gscTag: data.gscTag || '',
+        }));
+      }
+    } catch {
+      // Ignora erro silenciosamente
+    }
+  };
 
   const runAudit = async () => {
     setLoading(true);
@@ -61,12 +78,34 @@ export default function AdminSeoPage() {
 
   useEffect(() => {
     runAudit();
+    loadSeoSettings();
   }, []);
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFeedback('Configurações de SEO e Analytics salvas com sucesso!');
-    setTimeout(() => setFeedback(null), 4000);
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/admin/seo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ga4Id: seoSettings.ga4Id || null,
+          gscTag: seoSettings.gscTag || null,
+        }),
+      });
+
+      if (res.ok) {
+        setFeedback('Configurações de SEO e Analytics salvas no banco com sucesso!');
+        runAudit();
+      } else {
+        setFeedback('Erro ao persistir configurações.');
+      }
+    } catch {
+      setFeedback('Erro de comunicação ao salvar configurações.');
+    } finally {
+      setIsSaving(false);
+      setTimeout(() => setFeedback(null), 4000);
+    }
   };
 
   const getScoreColor = (score: number) => {

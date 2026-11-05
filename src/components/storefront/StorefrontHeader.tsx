@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Menu, X } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
+import { CartButton } from '@/components/cart/CartButton';
 import type { Tenant, TenantBranding, TenantSettings } from '@/types/database.types';
 
 interface StorefrontHeaderProps {
@@ -63,7 +64,7 @@ export function StorefrontHeader({ tenant, branding, settings }: StorefrontHeade
             ))}
           </nav>
 
-          {/* Right Action: Contact / Status */}
+          {/* Right Action: Contact / Status / Cart */}
           <div className="hidden md:flex items-center gap-4">
             <Link
               href="/contato"
@@ -71,10 +72,12 @@ export function StorefrontHeader({ tenant, branding, settings }: StorefrontHeade
             >
               Fale Conosco
             </Link>
+            <CartButton />
           </div>
 
-          {/* Mobile Menu Button */}
-          <div className="flex md:hidden">
+          {/* Mobile Actions: Cart & Menu Button */}
+          <div className="flex md:hidden items-center gap-2">
+            <CartButton />
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}

@@ -1,5 +1,5 @@
 export type TenantStatus = 'active' | 'suspended' | 'cancelled';
-export type SiteMode = 'prelaunch' | 'live';
+export type SiteMode = 'prelaunch' | 'institutional' | 'commerce';
 export type PageStatus = 'draft' | 'published';
 export type ProductStatus = 'draft' | 'active' | 'archived';
 export type UnitType = 'ml' | 'l' | 'g' | 'kg' | 'un' | 'cx' | 'portion' | 'other';
@@ -215,4 +215,162 @@ export interface TenantFullContext {
   domains: TenantDomain[];
   settings: TenantSettings;
   branding: TenantBranding;
+  commerceSettings?: TenantCommerceSettings;
 }
+
+export type OrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'preparing'
+  | 'ready'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'awaiting_payment'
+  | 'paid';
+
+export type PaymentStatus =
+  | 'pending'
+  | 'processing'
+  | 'paid'
+  | 'failed'
+  | 'expired'
+  | 'cancelled'
+  | 'refunded'
+  | 'unpaid'
+  | 'awaiting_payment';
+
+export type FulfillmentType = 'delivery' | 'pickup';
+export type ScheduleType = 'asap' | 'scheduled';
+
+export interface TenantCommerceSettings {
+  tenant_id: string;
+  delivery_enabled: boolean;
+  pickup_enabled: boolean;
+  fixed_delivery_fee_cents: number;
+  free_delivery_threshold_cents?: number | null;
+  min_order_value_cents: number;
+  asap_enabled: boolean;
+  scheduled_enabled: boolean;
+  estimated_delivery_time_min: number;
+  estimated_pickup_time_min: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Order {
+  id: string;
+  tenant_id: string;
+  order_number: string;
+  public_tracking_token?: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email?: string | null;
+  fulfillment_type: FulfillmentType;
+  schedule_type: ScheduleType;
+  scheduled_for?: string | null;
+  status: OrderStatus;
+  payment_status: PaymentStatus;
+  subtotal_cents: number;
+  delivery_fee_cents: number;
+  discount_cents: number;
+  total_cents: number;
+  currency: string;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  items?: OrderItem[];
+  address?: OrderAddress | null;
+}
+
+export interface OrderStatusEvent {
+  id: string;
+  tenant_id: string;
+  order_id: string;
+  from_status?: OrderStatus | null;
+  to_status: OrderStatus;
+  source: 'system' | 'admin' | 'payment_webhook' | 'delivery_provider' | 'driver';
+  actor_user_id?: string | null;
+  metadata?: Record<string, any>;
+  created_at: string;
+}
+
+
+export interface OrderItem {
+  id: string;
+  tenant_id: string;
+  order_id: string;
+  product_id: string;
+  variant_id: string;
+  snapshot_product_name: string;
+  snapshot_variant_name: string;
+  quantity: number;
+  unit_price_cents: number;
+  subtotal_cents: number;
+  created_at: string;
+}
+
+export interface OrderAddress {
+  id: string;
+  tenant_id: string;
+  order_id: string;
+  zip_code: string;
+  street: string;
+  number: string;
+  complement?: string | null;
+  neighborhood: string;
+  city: string;
+  state: string;
+  reference?: string | null;
+  created_at: string;
+}
+
+export type PaymentGatewayProvider = 'mock' | 'asaas' | 'mercadopago';
+export type PaymentMethod = 'pix' | 'credit_card';
+export type PaymentTransactionStatus = 'pending' | 'paid' | 'expired' | 'failed' | 'refunded';
+
+export interface TenantPaymentSettings {
+  tenant_id: string;
+  provider: PaymentGatewayProvider;
+  is_active: boolean;
+  pix_enabled: boolean;
+  pix_expiration_minutes: number;
+  sandbox_mode: boolean;
+  api_key_encrypted?: string | null;
+  webhook_secret?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaymentTransaction {
+  id: string;
+  tenant_id: string;
+  order_id: string;
+  provider: PaymentGatewayProvider;
+  provider_payment_id?: string | null;
+  method: PaymentMethod;
+  status: PaymentTransactionStatus;
+  amount_cents: number;
+  pix_qr_code_text?: string | null;
+  pix_qr_code_url?: string | null;
+  pix_expires_at: string;
+  paid_at?: string | null;
+  failed_reason?: string | null;
+  metadata?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaymentWebhookEventRecord {
+  id: string;
+  tenant_id: string;
+  provider: PaymentGatewayProvider;
+  event_id: string;
+  event_type: string;
+  payload: Record<string, any>;
+  processed: boolean;
+  processed_at?: string | null;
+  error_message?: string | null;
+  created_at: string;
+}
+

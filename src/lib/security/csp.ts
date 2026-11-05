@@ -8,8 +8,6 @@ export interface CspOptions {
   includeGoogleAnalytics?: boolean;
   includeGoogleTagManager?: boolean;
   includeSupabase?: boolean;
-  includeCloudinary?: boolean;
-  paymentGateways?: ('stripe' | 'mercadopago' | 'asaas')[];
   additionalConnectSrc?: string[];
   additionalImgSrc?: string[];
   additionalFrameSrc?: string[];
@@ -26,8 +24,6 @@ export function buildContentSecurityPolicy(options: CspOptions = {}): string {
     includeGoogleAnalytics = true,
     includeGoogleTagManager = true,
     includeSupabase = true,
-    includeCloudinary = false, // Desabilitado por padrão até integração ativa
-    paymentGateways = [],      // Desabilitados por padrão até fase da loja/pagamento
     additionalConnectSrc = [],
     additionalImgSrc = [],
     additionalFrameSrc = [],
@@ -61,24 +57,6 @@ export function buildContentSecurityPolicy(options: CspOptions = {}): string {
   if (includeSupabase) {
     connectSrc.push('https://*.supabase.co', 'wss://*.supabase.co');
     imgSrc.push('https://*.supabase.co');
-  }
-
-  // CDNs homologadas para assets estáticos e mídias (apenas quando ativadas)
-  if (includeCloudinary) {
-    imgSrc.push('https://res.cloudinary.com');
-  }
-
-  // Gateways de Pagamento homologados (somente quando módulo financeiro estiver ativo)
-  if (paymentGateways.includes('stripe')) {
-    scriptSrc.push('https://js.stripe.com');
-    frameSrc.push('https://js.stripe.com');
-    connectSrc.push('https://api.stripe.com');
-  }
-
-  if (paymentGateways.includes('mercadopago')) {
-    scriptSrc.push('https://sdk.mercadopago.com');
-    frameSrc.push('https://www.mercadopago.com');
-    connectSrc.push('https://api.mercadopago.com');
   }
 
   // Entradas adicionais homologadas

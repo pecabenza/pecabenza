@@ -11,6 +11,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { generateProductJsonLd, generateBreadcrumbJsonLd } from '@/lib/seo/schema';
+import { ProductCommerceAction } from '@/components/cart/ProductCommerceAction';
 
 interface ProductDetailPageProps {
   params: Promise<{ slug: string }>;
@@ -138,47 +139,15 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 )}
               </div>
 
-              {/* Variações e Tamanhos */}
-              {product.variants && product.variants.length > 0 && (
-                <div className="space-y-3 pt-4 border-t border-tenant-border/40">
-                  <span className="text-xs uppercase font-bold tracking-wider text-tenant-text block">
-                    Tamanhos e Porções Disponíveis
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {product.variants.map((v) => (
-                      <Card key={v.id} className="p-4 bg-tenant-surface border-tenant-border">
-                        <div className="flex items-center justify-between">
-                          <span className="font-heading font-bold text-tenant-text text-sm">
-                            {v.name}
-                          </span>
-                          <Badge variant="neutral" className="text-[10px]">
-                            {v.unit_value} {v.unit_type}
-                          </Badge>
-                        </div>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Modo Pré-Lançamento (CTA Neutro) */}
-              <div className="p-5 rounded-tenant bg-tenant-surface border border-tenant-border/80 space-y-3">
-                <div className="flex items-center gap-2 text-tenant-primary text-xs font-semibold uppercase tracking-wider">
-                  <Clock className="w-4 h-4" />
-                  <span>Modo Pré-Lançamento</span>
-                </div>
-                <p className="text-xs text-tenant-muted leading-relaxed">
-                  Os pedidos serão abertos em breve com lotes semanais programados. Acompanhe as novidades pelo nosso contato.
-                </p>
-                <div className="pt-1">
-                  <Link
-                    href="/contato"
-                    className="w-full inline-flex items-center justify-center py-3 px-4 rounded-tenant bg-tenant-primary text-white text-sm font-semibold hover:brightness-110 transition-all shadow-sm"
-                  >
-                    <span>{settings.prelaunch_cta_text || 'Em breve'}</span>
-                  </Link>
-                </div>
-              </div>
+              {/* Ação Comercial / Adicionar à Sacola */}
+              <ProductCommerceAction
+                productId={product.id}
+                productName={product.name}
+                productSlug={product.slug}
+                coverImageUrl={product.cover_image_url}
+                variants={product.variants || []}
+                siteMode={tenant.site_mode}
+              />
 
               {/* Descrição Completa */}
               {product.full_description && (

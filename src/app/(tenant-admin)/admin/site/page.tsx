@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layers,
   Eye,
@@ -9,9 +9,11 @@ import {
   ArrowDown,
   Edit3,
   CheckCircle2,
+  AlertCircle,
   X,
   Save,
-  ImageIcon,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -19,159 +21,141 @@ import { ImageUploadField } from '@/components/admin/ImageUploadField';
 
 interface SectionItem {
   id: string;
-  type: string;
-  name: string;
-  order: number;
-  isActive: boolean;
-  summary: string;
+  page_id?: string;
+  section_type: string;
+  variant: string;
+  display_order: number;
+  is_active: boolean;
   content: Record<string, any>;
   defaultMockupUrl?: string;
 }
 
-const INITIAL_SECTIONS: SectionItem[] = [
-  {
-    id: 'sec-01',
-    type: 'HeroEditorial',
-    name: 'Hero Principal',
-    order: 1,
-    isActive: true,
-    summary: 'Banner editorial com título, fotografia gastronômica e CTAs de cardápio',
-    defaultMockupUrl: '/assets/brands/benza/mockup-hero-editorial.jpg',
-    content: {
-      badge: 'Pratos Prontos para Aquecer',
-      title: 'A comodidade da boa comida à sua mesa',
-      subtitle:
-        'Receitas preparadas com atenção aos detalhes, porcionadas e prontas para aquecer no seu dia a dia.',
-      primary_cta_label: 'Conheça o Cardápio',
-      primary_cta_href: '/produtos',
-      secondary_cta_label: 'Nossa Proposta',
-      secondary_cta_href: '/sobre',
-      highlight_note: 'Modo pré-lançamento ativo — Cardápio inaugural em breve',
-      image_url: '/assets/brands/benza/mockup-hero-editorial.jpg',
-    },
-  },
-  {
-    id: 'sec-02',
-    type: 'BrandStorySection',
-    name: 'Manifesto & Proposta',
-    order: 2,
-    isActive: true,
-    summary: 'História, proposta de preparo e fotografia da essência da cozinha',
-    defaultMockupUrl: '/assets/brands/benza/mockup-hero-editorial.jpg',
-    content: {
-      eyebrow: 'Nossa Proposta',
-      title: 'Comida bem feita para quem valoriza praticidade',
-      lead_paragraph:
-        'A BENZA nasceu para oferecer refeições práticas sem abrir mão do sabor de uma comida feita com atenção aos detalhes.',
-      description:
-        'Nossos pratos são preparados, porcionados e congelados para que você possa desfrutar de uma refeição completa com o simples aquecimento em casa ou no trabalho.',
-      cta_label: 'Conheça mais sobre nós',
-      cta_href: '/sobre',
-      image_url: '/assets/brands/benza/mockup-hero-editorial.jpg',
-    },
-  },
-  {
-    id: 'sec-03',
-    type: 'ProductShowcaseSection',
-    name: 'Vitrine de Pratos',
-    order: 3,
-    isActive: true,
-    summary: 'Destaque dos pratos Feijoada e Lasanha com porções e fotografia',
-    content: {
-      title: 'Pratos em Destaque',
-      subtitle:
-        'Porções individuais e para compartilhar, desenvolvidas com equilíbrio nutricional e sabor inigualável.',
-      show_variants: true,
-      cta_label: 'Ver todo o cardápio',
-      cta_href: '/produtos',
-    },
-  },
-  {
-    id: 'sec-04',
-    type: 'BenefitsSection',
-    name: 'Pilares & Benefícios',
-    order: 4,
-    isActive: true,
-    summary: 'Preparo com cuidado, conservação, praticidade e porções sob medida',
-    content: {
-      title: 'Como Funciona a BENZA',
-      subtitle: 'Praticidade, porções pensadas e preparo descomplicado.',
-    },
-  },
-  {
-    id: 'sec-05',
-    type: 'CTASection',
-    name: 'Aviso de Lançamento',
-    order: 5,
-    isActive: true,
-    summary: 'Formulário de captação de e-mails para o lançamento',
-    content: {
-      title: 'Acompanhe o início das operações',
-      description:
-        'Cadastre seu e-mail para receber a data de abertura dos primeiros pedidos e novidades.',
-      button_label: 'Cadastrar para novidades',
-    },
-  },
-  {
-    id: 'sec-06',
-    type: 'FAQSection',
-    name: 'Dúvidas Frequentes',
-    order: 6,
-    isActive: true,
-    summary: 'Perguntas sobre porções, conservação e aquecimento',
-    content: {
-      title: 'Perguntas Frequentes',
-      subtitle: 'Informações essenciais sobre nossos pratos e atendimento.',
-    },
-  },
-  {
-    id: 'sec-07',
-    type: 'ContactSection',
-    name: 'Fale Conosco',
-    order: 7,
-    isActive: true,
-    summary: 'Canais de atendimento, redes e formulário direto',
-    content: {
-      title: 'Fale Conosco',
-      description: 'Dúvidas ou sugestões? Nossa equipe está pronta para conversar.',
-    },
-  },
-];
-
 export default function AdminSitePage() {
-  const [sections, setSections] = useState<SectionItem[]>(INITIAL_SECTIONS);
+  const [sections, setSections] = useState<SectionItem[]>([]);
+  const [pageId, setPageId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
   const [editingSection, setEditingSection] = useState<SectionItem | null>(null);
-  const [savedNotification, setSavedNotification] = useState(false);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const toggleActive = (id: string) => {
-    setSections(sections.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s)));
-    showSaved('Status da seção alterado com sucesso');
+  const showSaved = (msg: string) => {
+    setSavedMessage(msg);
+    setTimeout(() => setSavedMessage(null), 3500);
   };
 
-  const moveSection = (index: number, direction: 'up' | 'down') => {
+  const loadSections = async () => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/admin/sections?page=home');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSections(data.sections || []);
+        setPageId(data.pageId || '');
+      } else {
+        setErrorMessage(data.error || 'Erro ao carregar seções da página.');
+      }
+    } catch {
+      setErrorMessage('Erro de comunicação ao carregar seções.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSections();
+  }, []);
+
+  const handleToggleActive = async (id: string, current: boolean) => {
+    try {
+      const res = await fetch(`/api/admin/sections/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !current }),
+      });
+      if (res.ok) {
+        setSections(sections.map((s) => (s.id === id ? { ...s, is_active: !current } : s)));
+        showSaved(`Seção ${!current ? 'ativada' : 'desativada'} com sucesso.`);
+      } else {
+        alert('Falha ao alterar visibilidade da seção.');
+      }
+    } catch {
+      alert('Erro ao atualizar seção.');
+    }
+  };
+
+  const handleMove = async (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= sections.length) return;
 
+    const currentSec = sections[index];
+    const targetSec = sections[targetIndex];
+
     const newSections = [...sections];
-    const [moved] = newSections.splice(index, 1);
-    newSections.splice(targetIndex, 0, moved);
+    newSections[index] = { ...targetSec, display_order: index + 1 };
+    newSections[targetIndex] = { ...currentSec, display_order: targetIndex + 1 };
 
-    setSections(newSections.map((s, idx) => ({ ...s, order: idx + 1 })));
-    showSaved('Ordem das seções atualizada');
+    setSections(newSections);
+
+    try {
+      await Promise.all([
+        fetch(`/api/admin/sections/${currentSec.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_order: targetIndex + 1 }),
+        }),
+        fetch(`/api/admin/sections/${targetSec.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_order: index + 1 }),
+        }),
+      ]);
+      showSaved('Ordem das seções atualizada.');
+    } catch {
+      alert('Erro ao persistir nova ordenação.');
+      loadSections();
+    }
   };
 
-  const showSaved = (msg?: string) => {
-    setSavedNotification(true);
-    setTimeout(() => setSavedNotification(false), 3000);
-  };
-
-  const handleSaveSection = (e: React.FormEvent) => {
+  const handleSaveSection = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSection) return;
 
-    setSections(sections.map((s) => (s.id === editingSection.id ? editingSection : s)));
-    setEditingSection(null);
-    showSaved('Conteúdo da seção salvo com sucesso!');
+    setIsSaving(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/admin/sections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingSection.id,
+          page_id: pageId,
+          section_type: editingSection.section_type,
+          variant: editingSection.variant || 'default',
+          display_order: editingSection.display_order,
+          is_active: editingSection.is_active,
+          content: editingSection.content,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSections(
+          sections.map((s) => (s.id === data.section.id ? data.section : s))
+        );
+        setEditingSection(null);
+        showSaved('Conteúdo da seção persistido com sucesso no banco!');
+      } else {
+        const details = data.details ? data.details.map((d: any) => `${d.field}: ${d.message}`).join(', ') : '';
+        setErrorMessage(`${data.error || 'Erro ao salvar seção.'} ${details}`);
+      }
+    } catch {
+      setErrorMessage('Erro de comunicação ao salvar alterações.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -182,120 +166,151 @@ export default function AdminSitePage() {
             Seções da Página Inicial
           </h1>
           <p className="text-sm text-stone-500">
-            Edite os textos, substitua fotografias institucionais e reordene blocos do storefront.
+            Gerencie o conteúdo, visibilidade e a ordem dos blocos institucionais da Home.
           </p>
         </div>
 
-        {savedNotification && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Alterações salvas com sucesso</span>
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-3">
-        {sections.map((section, index) => (
-          <Card
-            key={section.id}
-            className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white transition-all ${
-              !section.isActive ? 'opacity-60 bg-stone-50' : ''
-            }`}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadSections}
+            disabled={loading}
+            className="gap-2"
           >
-            <div className="flex items-start sm:items-center gap-4">
-              <div className="w-8 h-8 rounded-lg bg-stone-100 text-stone-600 font-mono text-xs font-bold flex items-center justify-center shrink-0">
-                0{index + 1}
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-stone-900 text-sm">{section.name}</h3>
-                  <span className="text-[10px] font-mono uppercase bg-stone-100 text-stone-500 px-2 py-0.5 rounded">
-                    {section.type}
-                  </span>
-                </div>
-                <p className="text-xs text-stone-500">{section.summary}</p>
-              </div>
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Recarregar</span>
+          </Button>
+
+          {savedMessage && (
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>{savedMessage}</span>
             </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-center">
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => setEditingSection({ ...section, content: { ...section.content } })}
-                className="gap-1.5 text-xs h-8 bg-stone-100 hover:bg-stone-200 text-stone-700"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>Editar Bloco</span>
-              </Button>
-
-              <button
-                type="button"
-                onClick={() => moveSection(index, 'up')}
-                disabled={index === 0}
-                className="p-2 rounded hover:bg-stone-100 disabled:opacity-30 disabled:hover:bg-transparent text-stone-600"
-                title="Mover para cima"
-              >
-                <ArrowUp className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => moveSection(index, 'down')}
-                disabled={index === sections.length - 1}
-                className="p-2 rounded hover:bg-stone-100 disabled:opacity-30 disabled:hover:bg-transparent text-stone-600"
-                title="Mover para baixo"
-              >
-                <ArrowDown className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => toggleActive(section.id)}
-                className={`p-2 rounded transition-colors ${
-                  section.isActive
-                    ? 'text-emerald-600 hover:bg-emerald-50'
-                    : 'text-stone-400 hover:bg-stone-100'
-                }`}
-                title={section.isActive ? 'Desativar seção' : 'Ativar seção'}
-              >
-                {section.isActive ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-              </button>
-            </div>
-          </Card>
-        ))}
+          )}
+        </div>
       </div>
 
-      {/* MODAL DE EDIÇÃO DE SEÇÃO CMS */}
+      {errorMessage && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 flex items-start gap-3 text-xs text-red-800 animate-in fade-in">
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="p-12 text-center text-stone-500 flex flex-col items-center justify-center gap-2">
+          <Loader2 className="w-6 h-6 animate-spin text-amber-600" />
+          <span className="text-sm">Carregando seções do banco de dados...</span>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {sections.length === 0 ? (
+            <div className="p-8 text-center bg-white rounded-xl border border-stone-200">
+              <p className="text-sm text-stone-500">Nenhuma seção encontrada para esta página.</p>
+            </div>
+          ) : (
+            sections.map((section, index) => (
+              <Card
+                key={section.id}
+                className={`p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                  section.is_active ? 'bg-white' : 'bg-stone-50/70 border-dashed opacity-75'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-stone-100 text-stone-600 flex items-center justify-center font-mono text-xs font-bold shrink-0 mt-0.5">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-stone-900 text-sm">
+                        {section.content?.title || section.section_type}
+                      </h3>
+                      <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
+                        {section.section_type}
+                      </span>
+                      {!section.is_active && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                          Oculto
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-stone-500 line-clamp-1 mt-0.5">
+                      {section.content?.subtitle || section.content?.description || 'Bloco modular configurável'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
+                  <button
+                    onClick={() => handleMove(index, 'up')}
+                    disabled={index === 0}
+                    className="p-1.5 text-stone-400 hover:text-stone-700 disabled:opacity-30 rounded hover:bg-stone-100"
+                    title="Mover para cima"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleMove(index, 'down')}
+                    disabled={index === sections.length - 1}
+                    className="p-1.5 text-stone-400 hover:text-stone-700 disabled:opacity-30 rounded hover:bg-stone-100"
+                    title="Mover para baixo"
+                  >
+                    <ArrowDown className="w-4 h-4" />
+                  </button>
+                  <div className="h-4 w-px bg-stone-200 mx-1" />
+                  <button
+                    onClick={() => handleToggleActive(section.id, section.is_active)}
+                    className="p-1.5 text-stone-400 hover:text-stone-700 rounded hover:bg-stone-100"
+                    title={section.is_active ? 'Ocultar da Home' : 'Exibir na Home'}
+                  >
+                    {section.is_active ? <Eye className="w-4 h-4 text-emerald-600" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditingSection({ ...section, content: { ...section.content } })}
+                    className="gap-1.5 text-xs ml-2"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Editar</span>
+                  </Button>
+                </div>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Modal de Edição de Seção com Validação */}
       {editingSection && (
-        <div className="fixed inset-0 z-50 bg-stone-950/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-stone-200 my-8 overflow-hidden animate-in fade-in zoom-in-95">
-            <div className="px-6 py-5 border-b border-stone-100 flex items-center justify-between bg-stone-50">
-              <div className="space-y-0.5">
-                <h2 className="font-heading text-xl font-bold text-stone-900">
-                  Editar {editingSection.name}
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-2xl bg-white shadow-xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-stone-200 flex items-center justify-between">
+              <div>
+                <h2 className="font-heading text-lg font-bold text-stone-900">
+                  Editar {editingSection.section_type}
                 </h2>
                 <p className="text-xs text-stone-500">
-                  Tipo: <span className="font-mono">{editingSection.type}</span> — Atualize textos e fotografia.
+                  As alterações são validadas com schemas tipados e salvas no banco de dados.
                 </p>
               </div>
-
               <button
-                type="button"
                 onClick={() => setEditingSection(null)}
-                className="p-2 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-200/50 transition-colors"
+                className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveSection} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+            <form onSubmit={handleSaveSection} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto flex-1">
               {/* Fotografia da Seção se suportada */}
-              {(editingSection.type === 'HeroEditorial' ||
-                editingSection.type === 'BrandStorySection' ||
-                editingSection.type === 'ImageTextSection') && (
+              {(editingSection.section_type === 'HeroEditorial' ||
+                editingSection.section_type === 'BrandStorySection' ||
+                editingSection.section_type === 'ImageTextSection') && (
                 <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/50">
                   <ImageUploadField
-                    label="Fotografia Editorial da Seção (Mockup Ilustrativo)"
+                    label="Fotografia da Seção"
                     value={editingSection.content.image_url || ''}
                     onChange={(url) =>
                       setEditingSection({
@@ -304,150 +319,142 @@ export default function AdminSitePage() {
                       })
                     }
                     defaultImageUrl={editingSection.defaultMockupUrl}
-                    isMockup={editingSection.content.image_url?.includes('mockup')}
-                    category="hero"
-                    aspectRatio="video"
-                    helperText="Mockup temporário para desenvolvimento visual. Quando fotografias oficiais da marca estiverem disponíveis, faça o upload do arquivo homologado."
+                    category={editingSection.section_type === 'HeroEditorial' ? 'hero' : 'general'}
+                    aspectRatio="wide"
                   />
                 </div>
               )}
 
               {/* Título Principal */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase text-stone-700">Título da Seção</label>
-                <input
-                  type="text"
-                  required
-                  value={editingSection.content.title || ''}
-                  onChange={(e) =>
-                    setEditingSection({
-                      ...editingSection,
-                      content: { ...editingSection.content, title: e.target.value },
-                    })
-                  }
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-500"
-                />
-              </div>
-
-              {/* Subtítulo ou Descrição */}
-              {(editingSection.content.subtitle !== undefined ||
-                editingSection.content.description !== undefined) && (
+              {editingSection.content.title !== undefined && (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase text-stone-700">
-                    Subtítulo / Descrição
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={
-                      editingSection.content.subtitle ||
-                      editingSection.content.description ||
-                      ''
-                    }
-                    onChange={(e) => {
-                      const key =
-                        editingSection.content.subtitle !== undefined
-                          ? 'subtitle'
-                          : 'description';
-                      setEditingSection({
-                        ...editingSection,
-                        content: { ...editingSection.content, [key]: e.target.value },
-                      });
-                    }}
-                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-500"
-                  />
-                </div>
-              )}
-
-              {/* Badge ou Eyebrow se aplicável */}
-              {(editingSection.content.badge !== undefined ||
-                editingSection.content.eyebrow !== undefined) && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase text-stone-700">
-                    Etiqueta Superior (Badge / Eyebrow)
-                  </label>
+                  <label className="text-xs font-bold uppercase text-stone-700">Título Principal</label>
                   <input
                     type="text"
-                    value={
-                      editingSection.content.badge ||
-                      editingSection.content.eyebrow ||
-                      ''
-                    }
-                    onChange={(e) => {
-                      const key =
-                        editingSection.content.badge !== undefined ? 'badge' : 'eyebrow';
+                    value={editingSection.content.title || ''}
+                    onChange={(e) =>
                       setEditingSection({
                         ...editingSection,
-                        content: { ...editingSection.content, [key]: e.target.value },
-                      });
-                    }}
-                    className="w-full px-3.5 py-2.5 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-500"
+                        content: { ...editingSection.content, title: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
+                    required
                   />
                 </div>
               )}
 
-              {/* CTAs para HeroEditorial */}
-              {editingSection.type === 'HeroEditorial' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-stone-100">
+              {/* Subtítulo ou Descrição */}
+              {editingSection.content.subtitle !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Subtítulo</label>
+                  <textarea
+                    rows={3}
+                    value={editingSection.content.subtitle || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, subtitle: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800 resize-none"
+                  />
+                </div>
+              )}
+
+              {/* Lead Paragraph se houver (BrandStory) */}
+              {editingSection.content.lead_paragraph !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Parágrafo de Destaque</label>
+                  <textarea
+                    rows={2}
+                    value={editingSection.content.lead_paragraph || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, lead_paragraph: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800 resize-none"
+                  />
+                </div>
+              )}
+
+              {/* Descrição Longa */}
+              {editingSection.content.description !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Descrição / Texto</label>
+                  <textarea
+                    rows={3}
+                    value={editingSection.content.description || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, description: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800 resize-none"
+                  />
+                </div>
+              )}
+
+              {/* CTA Labels */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {editingSection.content.primary_cta_label !== undefined && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase text-stone-600">
-                      Rótulo do CTA Principal
-                    </label>
+                    <label className="text-xs font-bold uppercase text-stone-700">Botão Principal</label>
                     <input
                       type="text"
                       value={editingSection.content.primary_cta_label || ''}
                       onChange={(e) =>
                         setEditingSection({
                           ...editingSection,
-                          content: {
-                            ...editingSection.content,
-                            primary_cta_label: e.target.value,
-                          },
+                          content: { ...editingSection.content, primary_cta_label: e.target.value },
                         })
                       }
-                      className="w-full px-3 py-2 text-xs rounded border border-stone-300"
+                      className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
                     />
                   </div>
+                )}
 
+                {editingSection.content.secondary_cta_label !== undefined && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-bold uppercase text-stone-600">
-                      Rótulo do CTA Secundário
-                    </label>
+                    <label className="text-xs font-bold uppercase text-stone-700">Botão Secundário</label>
                     <input
                       type="text"
                       value={editingSection.content.secondary_cta_label || ''}
                       onChange={(e) =>
                         setEditingSection({
                           ...editingSection,
-                          content: {
-                            ...editingSection.content,
-                            secondary_cta_label: e.target.value,
-                          },
+                          content: { ...editingSection.content, secondary_cta_label: e.target.value },
                         })
                       }
-                      className="w-full px-3 py-2 text-xs rounded border border-stone-300"
+                      className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
                     />
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Ações */}
-              <div className="pt-4 border-t border-stone-100 flex items-center justify-end gap-3">
+              {/* Rodapé do Modal */}
+              <div className="pt-4 border-t border-stone-200 flex items-center justify-end gap-3 sticky bottom-0 bg-white">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => setEditingSection(null)}
-                  className="text-stone-600"
                 >
                   Cancelar
                 </Button>
-
-                <Button type="submit" className="gap-2 bg-stone-900 text-white hover:bg-stone-800">
+                <Button
+                  type="submit"
+                  isLoading={isSaving}
+                  className="gap-2 bg-stone-900 text-white hover:bg-stone-800"
+                >
                   <Save className="w-4 h-4" />
-                  <span>Salvar Conteúdo</span>
+                  <span>Salvar Alterações</span>
                 </Button>
               </div>
             </form>
-          </div>
+          </Card>
         </div>
       )}
     </div>
