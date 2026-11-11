@@ -5,9 +5,17 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
+  Zap,
+  ChefHat,
+  Flame,
+  ShoppingBag,
   Layers,
   UtensilsCrossed,
-  ShoppingBag,
+  Package,
+  ClipboardList,
+  Truck,
+  Bike,
+  Store,
   Palette,
   Search,
   ExternalLink,
@@ -37,9 +45,18 @@ export function AdminLayoutShell({
 
   const navigation = [
     { name: 'Visão Geral', href: '/admin', icon: LayoutDashboard },
+    { name: 'Pedido Rápido (PDV)', href: '/admin/pedido-rapido', icon: Zap },
+    { name: 'KDS Cozinha', href: '/admin/kds', icon: Flame },
+    { name: 'Operação', href: '/admin/operacao', icon: ChefHat },
+    { name: 'Expedição & Rotas', href: '/admin/expedicao', icon: Truck },
+    { name: 'Entregadores', href: '/admin/entregadores', icon: Bike },
+    { name: 'Configurações da Loja', href: '/admin/configuracoes/loja', icon: Store },
+    { name: 'Estações & Fluxo', href: '/admin/configuracoes/operacao', icon: Layers },
     { name: 'Pedidos', href: '/admin/pedidos', icon: ShoppingBag },
     { name: 'Seções & CMS', href: '/admin/site', icon: Layers },
     { name: 'Cardápio & Pratos', href: '/admin/produtos', icon: UtensilsCrossed },
+    { name: 'Estoque & Congelados', href: '/admin/estoque', icon: Package },
+    { name: 'Fichas & Produção', href: '/admin/producao', icon: ClipboardList },
     { name: 'Identidade & Cores', href: '/admin/identidade', icon: Palette },
     { name: 'SEO & Metadados', href: '/admin/seo', icon: Search },
   ];
@@ -78,9 +95,8 @@ export function AdminLayoutShell({
 
       {/* Sidebar Desktop e Mobile Drawer */}
       <aside
-        className={`${
-          sidebarOpen ? 'block' : 'hidden'
-        } md:block w-full md:w-64 bg-stone-900 text-stone-300 flex-shrink-0 flex flex-col justify-between fixed md:sticky top-0 md:top-0 h-auto md:h-screen z-40`}
+        className={`${sidebarOpen ? 'block' : 'hidden'
+          } md:block w-full md:w-64 bg-stone-900 text-stone-300 flex-shrink-0 flex flex-col justify-between fixed md:sticky top-0 md:top-0 h-auto md:h-screen z-40`}
       >
         <div className="p-6 space-y-6">
           <div className="hidden md:flex items-center justify-between">
@@ -102,11 +118,10 @@ export function AdminLayoutShell({
                   key={item.name}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                    isActive
+                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
                       ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
                       : 'hover:bg-stone-800 text-stone-300 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
                   <span>{item.name}</span>
@@ -141,7 +156,17 @@ export function AdminLayoutShell({
 
       {/* Main Content */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
-        <div className="max-w-6xl mx-auto">{children}</div>
+        <div
+          className={
+            pathname.startsWith('/admin/kds') ||
+            pathname === '/admin/operacao' ||
+            pathname === '/admin/pedido-rapido'
+              ? 'max-w-[1800px] mx-auto'
+              : 'max-w-6xl mx-auto'
+          }
+        >
+          {children}
+        </div>
       </main>
     </div>
   );

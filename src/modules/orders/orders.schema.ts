@@ -64,6 +64,9 @@ export const CreateOrderInputSchema = z
     }),
     scheduleType: z.enum(['asap', 'scheduled']).default('asap'),
     scheduledFor: z.string().datetime({ message: 'Data/hora de agendamento em formato ISO inválido' }).optional(),
+    paymentMethod: z.enum(['pix', 'cash', 'card_on_delivery']).default('pix'),
+    cashChangeForCents: z.number().int().nonnegative().optional(),
+    idempotencyKey: z.string().trim().max(100).optional(),
     address: OrderAddressSchema.optional(),
     notes: z.string().trim().max(500, 'Observações não podem exceder 500 caracteres').optional(),
   })
@@ -100,4 +103,100 @@ export const CreateOrderInputSchema = z
   });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderInputSchema>;
+
+// Schema para Pedido Rápido Multicanal (/admin/pedido-rapido — Etapa 3C)
+export const QuickOrderCustomerSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, 'Informe o nome ou identificação do cliente (mínimo 2 caracteres)')
+    .max(150, 'Nome muito extenso'),
+  phone: z
+    .string()
+    .trim()
+    .max(30, 'Telefone inválido')
+    .optional()
+    .or(z.literal('')),
+  email: z
+    .string()
+    .trim()
+    .email('E-mail em formato inválido')
+    .max(255)
+    .optional()
+    .or(z.literal('')),
+});
+
+export const QuickOrderInputSchema = z
+  .object({
+    orderChannel: z.enum(['whatsapp', 'phone', 'counter', 'admin']).default('whatsapp'),
+    items: z.array(CartItemInputSchema).min(1, 'Adicione pelo menos um item ao pedido'),
+    customer: QuickOrderCustomerSchema,
+    fulfillmentType: z.enum(['delivery', 'pickup', 'dine_in'], {
+      errorMap: () => ({ message: 'Escolha entre Entrega, Retirada ou Consumo no Local' }),
+    }),
+    scheduleType: z.enum(['asap', 'scheduled']).default('asap'),
+    scheduledFor: z
+      .string()
+      .datetime({ message: 'Data/hora de agendamento em formato ISO inválido' })
+      .optional(),
+    paymentMethod: z
+      .enum(['pix', 'cash', 'card_on_delivery', 'pos_card', 'credit_card'])
+      .default('pix'),
+    markAsPaidNow: z.boolean().default(false),
+    cashChangeForCents: z.number().int().nonnegative().nullable().optional(),
+    discountCents: z.number().int().nonnegative().default(0),
+    deliveryFeeCentsOverride: z.number().int().nonnegative().nullable().optional(),
+    confirmImmediately: z.boolean().default(true),
+    address: OrderAddressSchema.optional(),
+    notes: z.string().trim().max(500, 'Observações não podem exceder 500 caracteres').optional(),
+    idempotencyKey: z.string().trim().min(8).max(100).optional(),
+  })
+  .superRefine((data, ctx) => {
+    // 1. Telefone obrigatório para WhatsApp, Telefone ou Entrega
+    const cleanPhone = (data.customer.phone || '').replace(/\D/g, '');
+    if (
+      (data.orderChannel === 'whatsapp' ||
+        data.orderChannel === 'phone' ||
+        data.fulfillmentType === 'delivery') &&
+      cleanPhone.length < 10
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customer', 'phone'],
+        message: 'Informe um telefone/WhatsApp válido com DDD para este canal ou entrega',
+      });
+    }
+
+    // 2. Endereço obrigatório para entrega
+    if (data.fulfillmentType === 'delivery' && !data.address) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['address'],
+        message: 'Endereço completo é obrigatório para entregas',
+      });
+    }
+
+    // 3. Agendamento futuro obrigatório quando scheduled
+    if (data.scheduleType === 'scheduled') {
+      if (!data.scheduledFor) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scheduledFor'],
+          message: 'Data e horário são obrigatórios para pedidos agendados',
+        });
+      } else {
+        const scheduledDate = new Date(data.scheduledFor);
+        if (isNaN(scheduledDate.getTime()) || scheduledDate.getTime() < Date.now() - 60000) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['scheduledFor'],
+            message: 'O horário de agendamento não pode estar no passado',
+          });
+        }
+      }
+    }
+  });
+
+export type QuickOrderInput = z.infer<typeof QuickOrderInputSchema>;
+
 

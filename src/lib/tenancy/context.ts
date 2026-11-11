@@ -202,3 +202,18 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
     return null;
   }
 }
+
+/**
+ * Invalida cache em memória do contexto de tenant após alterações administrativas.
+ */
+export function invalidateTenantCache(tenantId?: string): void {
+  if (!tenantId) {
+    tenantCache.clear();
+    return;
+  }
+  for (const [host, entry] of tenantCache.entries()) {
+    if (entry.data?.tenant?.id === tenantId) {
+      tenantCache.delete(host);
+    }
+  }
+}

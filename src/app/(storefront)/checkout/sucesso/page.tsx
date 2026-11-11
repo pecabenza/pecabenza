@@ -3,7 +3,7 @@
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { CheckCircle2, Clock, ShoppingBag, ArrowRight, Truck, Store } from 'lucide-react';
+import { CheckCircle2, Clock, ShoppingBag, ArrowRight, Truck, Store, Banknote, CreditCard } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -18,6 +18,9 @@ function OrderSuccessContent() {
   const total = searchParams.get('total') || 'R$ 0,00';
   const name = searchParams.get('name') || 'Cliente';
   const fulfillment = searchParams.get('fulfillment') || 'delivery';
+  const rawPaymentMethod = searchParams.get('paymentMethod') || 'pix';
+  const paymentMethod: 'pix' | 'cash' | 'card_on_delivery' =
+    rawPaymentMethod === 'cash' || rawPaymentMethod === 'card_on_delivery' ? rawPaymentMethod : 'pix';
 
   const [isPaid, setIsPaid] = useState(false);
 
@@ -49,6 +52,16 @@ function OrderSuccessContent() {
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Pago com Pix</span>
+                  </>
+                ) : paymentMethod === 'cash' ? (
+                  <>
+                    <Banknote className="w-3.5 h-3.5" />
+                    <span>Dinheiro na {fulfillment === 'delivery' ? 'Entrega' : 'Retirada'}</span>
+                  </>
+                ) : paymentMethod === 'card_on_delivery' ? (
+                  <>
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Cartão na {fulfillment === 'delivery' ? 'Entrega' : 'Retirada'}</span>
                   </>
                 ) : (
                   <>
@@ -84,14 +97,31 @@ function OrderSuccessContent() {
             </div>
           </div>
 
-          {/* Seção Transacional de Pagamento Pix (Etapa 2B) */}
-          {orderId && (
+          {/* Seção Transacional de Pagamento Pix (Etapa 2B) ou Instrução de Pagamento Presencial */}
+          {orderId && paymentMethod === 'pix' && (
             <div className="pt-2">
               <PixPaymentBox
                 orderId={orderId}
                 orderNumber={orderNumber}
                 onPaymentConfirmed={() => setIsPaid(true)}
               />
+            </div>
+          )}
+
+          {orderId && paymentMethod !== 'pix' && (
+            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-left space-y-1.5 text-xs text-emerald-800 dark:text-emerald-200">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                {paymentMethod === 'cash' ? <Banknote className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
+                <span>
+                  {paymentMethod === 'cash'
+                    ? 'Pagamento em dinheiro combinado'
+                    : 'Pagamento na maquininha combinado'}
+                </span>
+              </div>
+              <p className="leading-relaxed">
+                Seu pedido já foi registrado na cozinha. O pagamento de <strong>{total}</strong> será realizado diretamente no ato da{' '}
+                {fulfillment === 'delivery' ? 'entrega' : 'retirada'}.
+              </p>
             </div>
           )}
 

@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { Product, ProductCategory } from '@/types/database.types';
+import { hydrateProductsWithCoverUrls } from './media-helper';
 
 // Dados de fallback para desenvolvimento local caso o banco remoto não esteja conectado
 const MOCK_PRODUCTS: Product[] = [
@@ -153,6 +154,26 @@ const MOCK_PRODUCTS: Product[] = [
   },
 ];
 
+function sanitizeStorefrontProduct(product: Product, tenantId: string): Product {
+  const activeVariants = (product.variants || [])
+    .filter((v) => v.is_available !== false)
+    .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
+
+  let coverImageUrl = product.cover_image_url;
+  if (!coverImageUrl && tenantId === '00000000-0000-0000-0000-000000000001') {
+    const mockFallback = MOCK_PRODUCTS.find((m) => m.slug === product.slug);
+    if (mockFallback?.cover_image_url) {
+      coverImageUrl = mockFallback.cover_image_url;
+    }
+  }
+
+  return {
+    ...product,
+    cover_image_url: coverImageUrl,
+    variants: activeVariants,
+  };
+}
+
 export async function getTenantProducts(tenantId: string): Promise<Product[]> {
   try {
     const supabase = createAdminClient();
@@ -169,7 +190,9 @@ export async function getTenantProducts(tenantId: string): Promise<Product[]> {
       }
       return [];
     }
-    return data as Product[];
+
+    const hydrated = await hydrateProductsWithCoverUrls(supabase, tenantId, data as Product[]);
+    return hydrated.map((p) => sanitizeStorefrontProduct(p, tenantId));
   } catch {
     if (tenantId === '00000000-0000-0000-0000-000000000001') {
       return MOCK_PRODUCTS;
@@ -196,7 +219,9 @@ export async function getTenantProductBySlug(tenantId: string, slug: string): Pr
       }
       return null;
     }
-    return data as Product;
+
+    const [hydrated] = await hydrateProductsWithCoverUrls(supabase, tenantId, [data as Product]);
+    return hydrated ? sanitizeStorefrontProduct(hydrated, tenantId) : null;
   } catch {
     if (tenantId === '00000000-0000-0000-0000-000000000001') {
       const found = MOCK_PRODUCTS.find((p) => p.slug === slug);

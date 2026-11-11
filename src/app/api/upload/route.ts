@@ -159,16 +159,33 @@ export async function POST(request: NextRequest) {
           const publicUrl = publicUrlData.publicUrl;
 
           // Registrar metadados em public.media_assets
-          await supabase.from('media_assets').insert({
-            tenant_id: tenantId,
-            bucket: 'tenant-assets',
-            storage_path: storagePath,
-            original_filename: file.name,
-            mime_type: file.type,
-            byte_size: file.size,
-            asset_source: 'official',
-            is_private: false,
-          });
+          let mediaAssetId: string | null = null;
+          try {
+            const insertBuilder = supabase.from('media_assets').insert({
+              tenant_id: tenantId,
+              bucket: 'tenant-assets',
+              storage_path: storagePath,
+              original_filename: file.name,
+              mime_type: file.type,
+              byte_size: file.size,
+              asset_source: 'official',
+              is_private: false,
+            });
+            if (insertBuilder && typeof (insertBuilder as any).select === 'function') {
+              const { data: insertedMedia } = await (insertBuilder as any)
+                .select('id')
+                .maybeSingle();
+              mediaAssetId = insertedMedia?.id || null;
+            } else {
+              await insertBuilder;
+            }
+          } catch (mediaErr: any) {
+            logger.warn('Não foi possível registrar metadados em media_assets após upload', {
+              tenantId,
+              storagePath,
+              error: mediaErr?.message,
+            });
+          }
 
           logger.info('Arquivo salvo com sucesso no Supabase Storage', {
             tenantId,
@@ -179,6 +196,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({
             success: true,
             url: publicUrl,
+            mediaAssetId,
             storage: 'supabase',
             storagePath,
             filename,

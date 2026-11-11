@@ -38,7 +38,7 @@ export const ALLOWED_STATUS_TRANSITIONS: Record<CanonicalOrderStatus, CanonicalO
 };
 
 export interface ValidateTransitionOptions {
-  fulfillmentType?: 'delivery' | 'pickup';
+  fulfillmentType?: 'delivery' | 'pickup' | 'dine_in';
 }
 
 /**
@@ -63,11 +63,15 @@ export function isValidStatusTransition(
     };
   }
 
-  // Regra específica de modalidade de retirada (pickup)
-  if (options?.fulfillmentType === 'pickup' && toStatus === 'out_for_delivery') {
+  // Regra específica de modalidade de retirada (pickup) ou consumo local (dine_in)
+  if (
+    (options?.fulfillmentType === 'pickup' || options?.fulfillmentType === 'dine_in') &&
+    toStatus === 'out_for_delivery'
+  ) {
     return {
       valid: false,
-      reason: "Pedidos na modalidade Retirada (pickup) não passam por 'saiu para entrega'; transicione diretamente para 'entregue'.",
+      reason:
+        "Pedidos na modalidade Retirada ou Consumo Local não passam por 'saiu para entrega'; transicione diretamente para 'entregue'.",
     };
   }
 
@@ -102,5 +106,27 @@ export const PAYMENT_STATUS_LABELS: Record<CanonicalPaymentStatus, string> = {
   expired: 'Expirado',
   cancelled: 'Cancelado',
   refunded: 'Estornado',
+};
+
+export const ORDER_CHANNEL_LABELS: Record<string, string> = {
+  website: 'Site',
+  whatsapp: 'WhatsApp',
+  phone: 'Telefone',
+  counter: 'Balcão',
+  admin: 'Admin',
+};
+
+export const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  pix: 'Pix',
+  cash: 'Dinheiro',
+  card_on_delivery: 'Cartão na Entrega',
+  pos_card: 'Cartão / Maquininha POS',
+  credit_card: 'Cartão de Crédito',
+};
+
+export const FULFILLMENT_TYPE_LABELS: Record<string, string> = {
+  delivery: 'Entrega',
+  pickup: 'Retirada no Balcão',
+  dine_in: 'Consumo no Local',
 };
 

@@ -20,7 +20,14 @@ vi.mock('@/lib/supabase/admin', () => ({
       })),
     },
     from: vi.fn(() => ({
-      insert: vi.fn(async () => ({ data: null, error: null })),
+      insert: vi.fn(() => ({
+        select: vi.fn(() => ({
+          maybeSingle: vi.fn(async () => ({
+            data: { id: '00000000-0000-0000-0000-000000000999' },
+            error: null,
+          })),
+        })),
+      })),
     })),
   })),
 }));

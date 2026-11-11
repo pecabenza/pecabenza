@@ -77,6 +77,7 @@ export default async function HomePage() {
               settings={settings}
               tenantId={tenant.id}
               prelaunchCtaText={settings.prelaunch_cta_text}
+              siteMode={tenant.site_mode}
             />
           ))
         ) : (

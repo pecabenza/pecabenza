@@ -105,13 +105,20 @@ export async function POST(request: NextRequest) {
       error: error.message,
     });
 
-    // Se for erro de regra de negócio (ex: pedido mínimo, item esgotado), retornar 400 com mensagem amigável
+    // Se for erro de regra de negócio (ex: pedido mínimo, loja fechada, pagamento, estoque), retornar 400 amigável
     if (
       error.message?.includes('mínimo') ||
       error.message?.includes('esgotada') ||
       error.message?.includes('atualizado') ||
       error.message?.includes('indisponível') ||
-      error.message?.includes('agendamento')
+      error.message?.includes('agendamento') ||
+      error.message?.includes('fechada') ||
+      error.message?.includes('pausada') ||
+      error.message?.includes('horário') ||
+      error.message?.includes('pagamento') ||
+      error.message?.includes('estoque') ||
+      error.message?.includes('saldo') ||
+      error.message?.includes('desabilitados')
     ) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

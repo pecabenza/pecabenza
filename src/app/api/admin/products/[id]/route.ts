@@ -31,7 +31,7 @@ export async function DELETE(
     // Auditoria
     await adminClient.from('audit_logs').insert({
       tenant_id: session.tenant.id,
-      user_id: session.user.id,
+      actor_id: session.user.id,
       resource_type: 'products',
       resource_id: id,
       action: 'DELETE_PRODUCT',

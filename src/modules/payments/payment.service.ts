@@ -194,11 +194,14 @@ export class PaymentService {
       throw new Error(`Falha ao registrar cobrança no banco: ${saveError?.message || 'Erro desconhecido'}`);
     }
 
-    // 7. Atualiza o pedido para 'awaiting_payment'
+    // 7. Atualiza o pedido para 'awaiting_payment' (ou mantém status operacional se já confirmado/em preparo)
+    const shouldKeepOperationalStatus = ['confirmed', 'preparing', 'ready', 'out_for_delivery'].includes(
+      order.status
+    );
     await supabase
       .from('orders')
       .update({
-        status: 'awaiting_payment',
+        ...(shouldKeepOperationalStatus ? {} : { status: 'awaiting_payment' }),
         payment_status: 'awaiting_payment',
         updated_at: new Date().toISOString(),
       })

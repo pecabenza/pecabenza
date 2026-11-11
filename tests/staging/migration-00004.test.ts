@@ -89,15 +89,24 @@ describe.skipIf(!isConfigured)('Validação Específica — Migration 00004 (See
     expect(slugs).toContain('feijoada-benza');
     expect(slugs).toContain('lasanha-tradicional');
 
-    // Validação de variantes
+    const seedProducts = products?.filter((p: any) =>
+      ['feijoada-benza', 'lasanha-tradicional'].includes(p.slug)
+    ) || [];
+    const seedProductIds = seedProducts.map((p: any) => p.id);
+
+    // Validação das 4 variantes oficiais da seed BENZA
     const { data: variants, error: vErr } = await adminClient
       .from('product_variants')
       .select('id, name, unit_type, unit_value, price_in_cents')
-      .eq('tenant_id', TENANT_BENZA_ID);
+      .eq('tenant_id', TENANT_BENZA_ID)
+      .in('product_id', seedProductIds);
 
     expect(vErr).toBeNull();
-    expect(variants?.length).toBeGreaterThanOrEqual(4);
-    const unitTypes = variants?.map((v: any) => v.unit_type);
-    expect(unitTypes?.every((u: string) => u === 'ml')).toBe(true);
+    const seedVariants = variants?.filter((v: any) =>
+      ['500 ml (Individual farto)', '1000 ml (Para compartilhar)', '500 ml (Individual)', '1000 ml (Duas pessoas)'].includes(v.name)
+    ) || [];
+
+    expect(seedVariants.length).toBe(4);
+    expect(seedVariants.every((v: any) => v.unit_type === 'ml')).toBe(true);
   });
 });

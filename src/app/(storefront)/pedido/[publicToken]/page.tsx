@@ -13,6 +13,9 @@ import {
   Calendar,
   ShieldCheck,
   AlertCircle,
+  MapPin,
+  Navigation,
+  UserCheck,
 } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
@@ -43,6 +46,24 @@ interface PublicOrderData {
     neighborhood: string;
     city: string;
     state: string;
+  } | null;
+  delivery?: {
+    status: string;
+    statusLabel: string;
+    driverFirstName: string | null;
+    stopSequence: number;
+    dispatchedAt?: string | null;
+    arrivedAt?: string | null;
+    deliveredAt?: string | null;
+    proofSummary?: {
+      recipientName: string;
+      relationshipLabel: string;
+    } | null;
+    liveLocation?: {
+      latitude: number;
+      longitude: number;
+      recordedAt: string;
+    } | null;
   } | null;
   items: Array<{
     name: string;
@@ -250,6 +271,68 @@ export default function PublicOrderTrackingPage({ params }: OrderTrackingPagePro
                 timelineEvents={order.timeline}
               />
             </div>
+
+            {/* Rastreamento Logístico Dedicado (Etapa 3E) */}
+            {order.fulfillmentType === 'delivery' && order.delivery && (
+              <div className="p-4 rounded-2xl bg-tenant-background border border-tenant-border/70 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Truck className="w-4 h-4 text-tenant-primary" />
+                    <span className="text-xs font-bold text-tenant-text">
+                      Entrega: {order.delivery.statusLabel}
+                    </span>
+                  </div>
+                  {order.delivery.driverFirstName && (
+                    <span className="text-[11px] bg-tenant-surface border border-tenant-border px-2.5 py-1 rounded-full text-tenant-muted">
+                      Entregador: <strong className="text-tenant-text">{order.delivery.driverFirstName}</strong>
+                      {order.delivery.stopSequence > 0 && ` • Parada #${order.delivery.stopSequence}`}
+                    </span>
+                  )}
+                </div>
+
+                {order.delivery.liveLocation && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs">
+                    <div className="flex items-center gap-2 text-emerald-800">
+                      <Navigation className="w-4 h-4 text-emerald-600 animate-pulse" />
+                      <div>
+                        <span className="font-semibold block">Localização em rota compartilhada</span>
+                        <span className="text-[11px] text-emerald-700">
+                          Atualizada às{' '}
+                          {new Date(order.delivery.liveLocation.recordedAt).toLocaleTimeString('pt-BR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps?q=${order.delivery.liveLocation.latitude},${order.delivery.liveLocation.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors"
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>Ver posição</span>
+                    </a>
+                  </div>
+                )}
+
+                {order.delivery.proofSummary && (
+                  <div className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800">
+                    <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      Recebido por <strong>{order.delivery.proofSummary.recipientName}</strong> (
+                      {order.delivery.proofSummary.relationshipLabel})
+                      {order.delivery.deliveredAt &&
+                        ` às ${new Date(order.delivery.deliveredAt).toLocaleTimeString('pt-BR', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}`}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
 
           {/* Card com Detalhes dos Itens e Endereço */}

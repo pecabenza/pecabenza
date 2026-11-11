@@ -18,6 +18,9 @@ import {
   Minus,
   ShieldCheck,
   Loader2,
+  QrCode,
+  Banknote,
+  CreditCard,
 } from 'lucide-react';
 import { useCart, formatBrl } from '@/modules/cart/CartContext';
 import { Container } from '@/components/ui/Container';
@@ -25,6 +28,10 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { trackEvent } from '@/lib/analytics/events';
+import {
+  calculateDynamicDeliveryFee,
+  type StorePaymentOption,
+} from '@/modules/commerce/store-config.engine';
 
 interface ValidatedItem {
   productId: string;
@@ -57,9 +64,39 @@ interface ValidationResponse {
   error?: string;
 }
 
+interface StoreConfigResponse {
+  siteMode: 'prelaunch' | 'catalog' | 'commerce' | 'paused';
+  availability: {
+    open: boolean;
+    allowsScheduled: boolean;
+    reason?: string;
+  };
+  commerceSettings: {
+    deliveryEnabled: boolean;
+    pickupEnabled: boolean;
+    fixedDeliveryFeeCents: number;
+    freeDeliveryThresholdCents: number | null;
+    minOrderValueCents: number;
+    asapEnabled: boolean;
+    scheduledEnabled: boolean;
+    estimatedDeliveryTimeMin: number;
+    estimatedPickupTimeMin: number;
+  };
+  enabledPaymentMethods: StorePaymentOption[];
+  businessHoursSummary?: {
+    producao: string | null;
+    entregas: string | null;
+    enforceSchedule: boolean;
+  };
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, updateQuantity, removeItem, clearCart } = useCart();
+
+  // Configurações comerciais reais do servidor
+  const [storeConfig, setStoreConfig] = useState<StoreConfigResponse | null>(null);
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
 
   // Estados de revalidação server-side
   const [isValidating, setIsValidating] = useState(true);
@@ -73,6 +110,15 @@ export default function CheckoutPage() {
 
   // Modalidade de entrega
   const [fulfillmentType, setFulfillmentType] = useState<'delivery' | 'pickup'>('delivery');
+
+  // Pagamento e idempotência
+  const [paymentMethod, setPaymentMethod] = useState<StorePaymentOption>('pix');
+  const [cashChangeForReais, setCashChangeForReais] = useState('');
+  const [idempotencyKey] = useState(() =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
 
   // Endereço
   const [zipCode, setZipCode] = useState('');
@@ -138,6 +184,44 @@ export default function CheckoutPage() {
   }, [items]);
 
   useEffect(() => {
+    let active = true;
+    async function loadStoreConfig() {
+      setIsLoadingConfig(true);
+      try {
+        const res = await fetch('/api/store/config', { cache: 'no-store' });
+        if (!res.ok) return;
+        const cfg: StoreConfigResponse = await res.json();
+        if (!active) return;
+        setStoreConfig(cfg);
+
+        if (!cfg.commerceSettings.deliveryEnabled && cfg.commerceSettings.pickupEnabled) {
+          setFulfillmentType('pickup');
+        } else if (cfg.commerceSettings.deliveryEnabled) {
+          setFulfillmentType('delivery');
+        }
+
+        if (!cfg.commerceSettings.asapEnabled && cfg.commerceSettings.scheduledEnabled) {
+          setScheduleType('scheduled');
+        } else if (!cfg.availability.open && cfg.availability.allowsScheduled && cfg.commerceSettings.scheduledEnabled) {
+          setScheduleType('scheduled');
+        }
+
+        if (cfg.enabledPaymentMethods.length > 0) {
+          setPaymentMethod(cfg.enabledPaymentMethods[0]);
+        }
+      } catch {
+        // Fallback gracioso mantendo valores de contingência seguros
+      } finally {
+        if (active) setIsLoadingConfig(false);
+      }
+    }
+    loadStoreConfig();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     revalidateCart();
     trackEvent('begin_checkout', { itemsCount: items.length });
   }, [revalidateCart, items.length]);
@@ -164,15 +248,64 @@ export default function CheckoutPage() {
     }
   };
 
-  // Cálculo de frete e totais
+  // Cálculo autoritativo de frete, pedido mínimo e totais sincronizado com o servidor
   const subtotalCents = validationData?.subtotalInCents || 0;
-  const deliveryFeeCents = fulfillmentType === 'delivery' ? 1200 : 0; // Taxa padrão de R$ 12,00 se entrega
+  const effectiveSettings = storeConfig?.commerceSettings ?? {
+    deliveryEnabled: true,
+    pickupEnabled: true,
+    fixedDeliveryFeeCents: 1200,
+    freeDeliveryThresholdCents: null,
+    minOrderValueCents: 0,
+    asapEnabled: true,
+    scheduledEnabled: true,
+    estimatedDeliveryTimeMin: 45,
+    estimatedPickupTimeMin: 30,
+  };
+  const deliveryFeeCents = calculateDynamicDeliveryFee(subtotalCents, fulfillmentType, {
+    fixed_delivery_fee_cents: effectiveSettings.fixedDeliveryFeeCents,
+    free_delivery_threshold_cents: effectiveSettings.freeDeliveryThresholdCents,
+  });
   const totalCents = subtotalCents + deliveryFeeCents;
+
+  const isStoreCommerce = !storeConfig || storeConfig.siteMode === 'commerce';
+  const isStoreOpenNow = storeConfig ? storeConfig.availability.open : true;
+  const allowsScheduledWhenClosed = storeConfig ? storeConfig.availability.allowsScheduled : true;
+  const isBelowMinOrder =
+    effectiveSettings.minOrderValueCents > 0 && subtotalCents < effectiveSettings.minOrderValueCents;
+  const enabledPaymentMethods: StorePaymentOption[] =
+    storeConfig && storeConfig.enabledPaymentMethods.length > 0
+      ? storeConfig.enabledPaymentMethods
+      : ['pix'];
+  const isBlockedByStoreAvailability =
+    !isStoreCommerce ||
+    (!isStoreOpenNow && (!allowsScheduledWhenClosed || scheduleType !== 'scheduled'));
 
   // Submissão do pedido
   const handleConfirmOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+
+    if (!isStoreCommerce) {
+      setSubmitError(storeConfig?.availability.reason || 'A loja não está recebendo pedidos online no momento.');
+      return;
+    }
+
+    if (isBlockedByStoreAvailability) {
+      setSubmitError(storeConfig?.availability.reason || 'A loja está fechada ou pausada para pedidos imediatos.');
+      return;
+    }
+
+    if (isBelowMinOrder) {
+      setSubmitError(
+        `O pedido mínimo é de ${formatBrl(effectiveSettings.minOrderValueCents)}. Adicione mais itens para continuar.`
+      );
+      return;
+    }
+
+    if (validationData?.hasUnavailableItems) {
+      setSubmitError('Há itens indisponíveis ou sem estoque suficiente na sua sacola.');
+      return;
+    }
 
     // Validações client-side prévias
     if (!customerName.trim() || customerName.trim().length < 2) {
@@ -195,6 +328,23 @@ export default function CheckoutPage() {
     if (scheduleType === 'scheduled' && !scheduledDate) {
       setSubmitError('Por favor, escolha o dia e a janela para o agendamento.');
       return;
+    }
+
+    let parsedCashChangeCents: number | undefined;
+    if (paymentMethod === 'cash' && cashChangeForReais.trim()) {
+      const normalized = Number(cashChangeForReais.replace(',', '.'));
+      if (Number.isNaN(normalized) || normalized < 0) {
+        setSubmitError('Informe um valor válido para troco em dinheiro.');
+        return;
+      }
+      const cents = Math.round(normalized * 100);
+      if (cents > 0 && cents < totalCents) {
+        setSubmitError(`O valor para troco deve ser maior ou igual ao total (${formatBrl(totalCents)}).`);
+        return;
+      }
+      if (cents > 0) {
+        parsedCashChangeCents = cents;
+      }
     }
 
     setIsSubmitting(true);
@@ -220,6 +370,9 @@ export default function CheckoutPage() {
         fulfillmentType,
         scheduleType,
         scheduledFor: scheduledIso,
+        paymentMethod,
+        cashChangeForCents: parsedCashChangeCents,
+        idempotencyKey,
         address:
           fulfillmentType === 'delivery'
             ? {
@@ -269,6 +422,7 @@ export default function CheckoutPage() {
         total: data.formattedTotal,
         name: data.customerName,
         fulfillment: data.fulfillmentType,
+        paymentMethod,
       });
 
       router.push(`/checkout/sucesso?${successParams.toString()}`);
@@ -324,6 +478,27 @@ export default function CheckoutPage() {
             <span>Ambiente Seguro</span>
           </div>
         </div>
+
+        {/* Banner de Disponibilidade / Loja Fechada ou Pausada */}
+        {storeConfig && (!isStoreCommerce || !isStoreOpenNow) && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-sm">
+              <span className="font-bold block">
+                {!isStoreCommerce
+                  ? 'Pedidos online indisponíveis no momento'
+                  : 'Loja fora do horário ou temporariamente pausada'}
+              </span>
+              <p className="text-xs leading-relaxed">
+                {storeConfig.availability.reason ||
+                  'No momento não estamos recebendo pedidos imediatos.'}{' '}
+                {isStoreCommerce && allowsScheduledWhenClosed && effectiveSettings.scheduledEnabled
+                  ? 'Você ainda pode agendar seu pedido escolhendo uma data abaixo.'
+                  : ''}
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
           {/* Coluna Principal: Formulário Contínuo */}
@@ -396,52 +571,67 @@ export default function CheckoutPage() {
                   </h2>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setFulfillmentType('delivery')}
-                    className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
-                      fulfillmentType === 'delivery'
-                        ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
-                        : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <Truck className={`w-5 h-5 ${fulfillmentType === 'delivery' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
-                      {fulfillmentType === 'delivery' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
-                    </div>
-                    <div>
-                      <span className="font-heading font-bold text-sm text-tenant-text block">
-                        Entrega em Casa
-                      </span>
-                      <span className="text-xs text-tenant-muted block mt-0.5">
-                        Taxa fixa: {formatBrl(1200)}
-                      </span>
-                    </div>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {effectiveSettings.deliveryEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentType('delivery')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
+                        fulfillmentType === 'delivery'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <Truck className={`w-5 h-5 ${fulfillmentType === 'delivery' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {fulfillmentType === 'delivery' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Entrega em Casa
+                        </span>
+                        <span className="text-xs text-tenant-muted block mt-0.5">
+                          {effectiveSettings.fixedDeliveryFeeCents === 0
+                            ? 'Entrega grátis'
+                            : `Taxa: ${formatBrl(effectiveSettings.fixedDeliveryFeeCents)}`}
+                          {effectiveSettings.freeDeliveryThresholdCents
+                            ? ` · Grátis acima de ${formatBrl(effectiveSettings.freeDeliveryThresholdCents)}`
+                            : ''}
+                        </span>
+                        <span className="text-[11px] text-tenant-muted/80 block mt-0.5">
+                          Tempo estimado: ~{effectiveSettings.estimatedDeliveryTimeMin} min
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
-                  <button
-                    type="button"
-                    onClick={() => setFulfillmentType('pickup')}
-                    className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
-                      fulfillmentType === 'pickup'
-                        ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
-                        : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <Store className={`w-5 h-5 ${fulfillmentType === 'pickup' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
-                      {fulfillmentType === 'pickup' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
-                    </div>
-                    <div>
-                      <span className="font-heading font-bold text-sm text-tenant-text block">
-                        Retirada no Local
-                      </span>
-                      <span className="text-xs text-emerald-600 font-semibold block mt-0.5">
-                        Grátis (Sem taxa)
-                      </span>
-                    </div>
-                  </button>
+                  {effectiveSettings.pickupEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentType('pickup')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
+                        fulfillmentType === 'pickup'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <Store className={`w-5 h-5 ${fulfillmentType === 'pickup' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {fulfillmentType === 'pickup' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Retirada no Local
+                        </span>
+                        <span className="text-xs text-emerald-600 font-semibold block mt-0.5">
+                          Grátis (Sem taxa)
+                        </span>
+                        <span className="text-[11px] text-tenant-muted/80 block mt-0.5">
+                          Pronto em ~{effectiveSettings.estimatedPickupTimeMin} min
+                        </span>
+                      </div>
+                    </button>
+                  )}
                 </div>
 
                 {/* Formulário de Endereço se Entrega */}
@@ -593,52 +783,57 @@ export default function CheckoutPage() {
                   </h2>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setScheduleType('asap')}
-                    className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-1 transition-all ${
-                      scheduleType === 'asap'
-                        ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
-                        : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <Clock className={`w-5 h-5 ${scheduleType === 'asap' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
-                      {scheduleType === 'asap' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
-                    </div>
-                    <div>
-                      <span className="font-heading font-bold text-sm text-tenant-text block">
-                        Primeira Disponibilidade
-                      </span>
-                      <span className="text-[11px] text-tenant-muted block mt-0.5">
-                        Próxima rota programada
-                      </span>
-                    </div>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {effectiveSettings.asapEnabled && (
+                    <button
+                      type="button"
+                      disabled={!isStoreOpenNow}
+                      onClick={() => setScheduleType('asap')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                        scheduleType === 'asap'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <Clock className={`w-5 h-5 ${scheduleType === 'asap' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {scheduleType === 'asap' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Primeira Disponibilidade
+                        </span>
+                        <span className="text-[11px] text-tenant-muted block mt-0.5">
+                          {isStoreOpenNow ? 'Próxima rota programada' : 'Indisponível fora do horário'}
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
-                  <button
-                    type="button"
-                    onClick={() => setScheduleType('scheduled')}
-                    className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-1 transition-all ${
-                      scheduleType === 'scheduled'
-                        ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
-                        : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <Calendar className={`w-5 h-5 ${scheduleType === 'scheduled' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
-                      {scheduleType === 'scheduled' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
-                    </div>
-                    <div>
-                      <span className="font-heading font-bold text-sm text-tenant-text block">
-                        Agendar Horário
-                      </span>
-                      <span className="text-[11px] text-tenant-muted block mt-0.5">
-                        Escolha dia e janela
-                      </span>
-                    </div>
-                  </button>
+                  {effectiveSettings.scheduledEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setScheduleType('scheduled')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-1 transition-all ${
+                        scheduleType === 'scheduled'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <Calendar className={`w-5 h-5 ${scheduleType === 'scheduled' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {scheduleType === 'scheduled' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Agendar Horário
+                        </span>
+                        <span className="text-[11px] text-tenant-muted block mt-0.5">
+                          Escolha dia e janela
+                        </span>
+                      </div>
+                    </button>
+                  )}
                 </div>
 
                 {scheduleType === 'scheduled' && (
@@ -674,7 +869,112 @@ export default function CheckoutPage() {
                 )}
               </Card>
 
-              {/* 4. OBSERVAÇÕES */}
+              {/* 4. FORMA DE PAGAMENTO */}
+              <Card className="p-6 bg-tenant-surface border-tenant-border space-y-5">
+                <div className="flex items-center gap-2 text-tenant-primary border-b border-tenant-border/50 pb-3">
+                  <span className="w-6 h-6 rounded-full bg-tenant-primary/10 text-tenant-primary text-xs font-bold flex items-center justify-center">
+                    4
+                  </span>
+                  <h2 className="font-heading font-bold text-base text-tenant-text uppercase tracking-wide">
+                    Forma de Pagamento
+                  </h2>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {enabledPaymentMethods.includes('pix') && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('pix')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
+                        paymentMethod === 'pix'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <QrCode className={`w-5 h-5 ${paymentMethod === 'pix' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {paymentMethod === 'pix' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Pix Online
+                        </span>
+                        <span className="text-[11px] text-tenant-muted block mt-0.5">
+                          QR Code na próxima etapa
+                        </span>
+                      </div>
+                    </button>
+                  )}
+
+                  {enabledPaymentMethods.includes('cash') && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('cash')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
+                        paymentMethod === 'cash'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <Banknote className={`w-5 h-5 ${paymentMethod === 'cash' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {paymentMethod === 'cash' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Dinheiro
+                        </span>
+                        <span className="text-[11px] text-tenant-muted block mt-0.5">
+                          Na {fulfillmentType === 'delivery' ? 'entrega' : 'retirada'}
+                        </span>
+                      </div>
+                    </button>
+                  )}
+
+                  {enabledPaymentMethods.includes('card_on_delivery') && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('card_on_delivery')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
+                        paymentMethod === 'card_on_delivery'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <CreditCard className={`w-5 h-5 ${paymentMethod === 'card_on_delivery' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {paymentMethod === 'card_on_delivery' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Cartão (Maquininha)
+                        </span>
+                        <span className="text-[11px] text-tenant-muted block mt-0.5">
+                          Crédito ou Débito no local
+                        </span>
+                      </div>
+                    </button>
+                  )}
+                </div>
+
+                {paymentMethod === 'cash' && (
+                  <div className="pt-2 border-t border-tenant-border/40">
+                    <label className="block text-xs font-medium text-tenant-muted mb-1">
+                      Precisa de troco? Para quanto? (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={cashChangeForReais}
+                      onChange={(e) => setCashChangeForReais(e.target.value)}
+                      placeholder="Ex: 100,00 (deixe em branco se não precisar)"
+                      className="w-full sm:max-w-xs px-3 py-2 rounded-tenant bg-tenant-background border border-tenant-border text-sm text-tenant-text focus:outline-hidden focus:ring-2 focus:ring-tenant-primary"
+                    />
+                  </div>
+                )}
+              </Card>
+
+              {/* 5. OBSERVAÇÕES */}
               <Card className="p-6 bg-tenant-surface border-tenant-border space-y-3">
                 <label className="block text-xs font-bold uppercase tracking-wider text-tenant-text">
                   Observações para a Cozinha ou Entrega (opcional)
@@ -801,10 +1101,30 @@ export default function CheckoutPage() {
 
                 <div className="flex items-center justify-between text-tenant-muted text-xs">
                   <span>Taxa de {fulfillmentType === 'delivery' ? 'entrega' : 'retirada'}</span>
-                  <span className={fulfillmentType === 'pickup' ? 'text-emerald-600 font-semibold' : 'text-tenant-text font-semibold'}>
-                    {fulfillmentType === 'delivery' ? formatBrl(deliveryFeeCents) : 'Grátis'}
+                  <span className={deliveryFeeCents === 0 ? 'text-emerald-600 font-semibold' : 'text-tenant-text font-semibold'}>
+                    {deliveryFeeCents > 0 ? formatBrl(deliveryFeeCents) : 'Grátis'}
                   </span>
                 </div>
+
+                {fulfillmentType === 'delivery' &&
+                  effectiveSettings.freeDeliveryThresholdCents &&
+                  effectiveSettings.freeDeliveryThresholdCents > 0 &&
+                  subtotalCents < effectiveSettings.freeDeliveryThresholdCents && (
+                    <div className="text-[11px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-1.5">
+                      Faltam{' '}
+                      <span className="font-bold">
+                        {formatBrl(effectiveSettings.freeDeliveryThresholdCents - subtotalCents)}
+                      </span>{' '}
+                      para entrega grátis!
+                    </div>
+                  )}
+
+                {isBelowMinOrder && (
+                  <div className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1.5">
+                    Pedido mínimo: <span className="font-bold">{formatBrl(effectiveSettings.minOrderValueCents)}</span>. Faltam{' '}
+                    <span className="font-bold">{formatBrl(effectiveSettings.minOrderValueCents - subtotalCents)}</span>.
+                  </div>
+                )}
 
                 <div className="pt-2 border-t border-tenant-border/40 flex items-center justify-between">
                   <span className="font-heading font-bold text-base text-tenant-text">
@@ -815,6 +1135,17 @@ export default function CheckoutPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Avisos de Indisponibilidade de Itens */}
+              {validationData?.hasUnavailableItems && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs flex gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    {validationData.issues.find((i) => i.type !== 'price_changed')?.message ||
+                      'Um ou mais itens estão indisponíveis ou sem estoque suficiente.'}
+                  </span>
+                </div>
+              )}
 
               {/* Erros de Validação ou Submissão */}
               {(validationError || submitError) && (
@@ -828,7 +1159,15 @@ export default function CheckoutPage() {
               <Button
                 type="submit"
                 form="checkout-form"
-                disabled={isSubmitting || isValidating || items.length === 0}
+                disabled={
+                  isSubmitting ||
+                  isValidating ||
+                  isLoadingConfig ||
+                  items.length === 0 ||
+                  isBlockedByStoreAvailability ||
+                  isBelowMinOrder ||
+                  Boolean(validationData?.hasUnavailableItems)
+                }
                 className="w-full py-4 text-sm uppercase tracking-wider font-bold gap-2 rounded-xl shadow-md bg-tenant-primary text-white hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50"
               >
                 {isSubmitting ? (
@@ -845,7 +1184,11 @@ export default function CheckoutPage() {
               </Button>
 
               <p className="text-[11px] text-tenant-muted text-center leading-relaxed">
-                Pagamento via Pix ou Cartão disponibilizado na próxima etapa. Nenhum valor é cobrado antecipadamente sem a sua aprovação.
+                {paymentMethod === 'pix'
+                  ? 'QR Code Pix disponibilizado imediatamente na próxima etapa.'
+                  : paymentMethod === 'cash'
+                    ? 'Pagamento em dinheiro diretamente no ato da entrega ou retirada.'
+                    : 'Pagamento na maquininha de cartão no ato da entrega ou retirada.'}
               </p>
             </Card>
           </div>

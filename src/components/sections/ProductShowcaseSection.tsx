@@ -7,18 +7,20 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { QuickAddToCartButton } from '@/components/cart/QuickAddToCartButton';
 import type { ProductShowcaseContent } from '@/modules/cms/schemas';
-import type { Product } from '@/types/database.types';
+import type { Product, SiteMode } from '@/types/database.types';
 
 interface ProductShowcaseSectionProps {
   content: ProductShowcaseContent;
   products?: Product[];
   ctaButtonText?: string;
+  siteMode?: SiteMode | null;
 }
 
 export function ProductShowcaseSection({
   content,
   products = [],
   ctaButtonText = 'Em breve',
+  siteMode = 'commerce',
 }: ProductShowcaseSectionProps) {
   return (
     <section className="py-16 sm:py-24 bg-tenant-background transition-colors">
@@ -119,7 +121,7 @@ export function ProductShowcaseSection({
                     <span>Ver Detalhes</span>
                     <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </Link>
-                  <QuickAddToCartButton product={product} />
+                  <QuickAddToCartButton product={product} siteMode={siteMode} />
                 </div>
               </div>
             </Card>

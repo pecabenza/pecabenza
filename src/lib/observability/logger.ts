@@ -18,7 +18,16 @@ export interface LogContext {
     | 'rate_limit_driver_failure'
     | 'security_violation'
     | 'lead_created'
-    | 'seo_audit';
+    | 'seo_audit'
+    | 'preparation_started'
+    | 'item_ready'
+    | 'order_ready'
+    | 'sla_breached'
+    | 'station_step_started'
+    | 'station_step_completed'
+    | 'station_step_skipped'
+    | 'station_capacity_warning'
+    | 'predicted_delay';
   path?: string;
   method?: string;
   statusCode?: number;

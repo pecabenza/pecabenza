@@ -19,6 +19,7 @@ import {
   MapPin,
   Calendar,
   DollarSign,
+  Printer,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -27,28 +28,37 @@ import {
   CanonicalPaymentStatus,
   ORDER_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
+  ORDER_CHANNEL_LABELS,
   ALLOWED_STATUS_TRANSITIONS,
 } from '@/modules/orders/order-status.machine';
 import { formatBrl } from '@/modules/cart/cart.utils';
+import { OrderPrintModal } from '@/components/admin/orders/OrderPrintModal';
+import { mapOrderDetailToOperationalOrder } from '@/components/admin/orders/order-print-adapter';
 
 interface OrderDetail {
   id: string;
+  tenant_id?: string;
   order_number: string;
   public_tracking_token?: string;
+  order_channel?: string;
   customer_name: string;
   customer_phone: string;
   customer_email?: string | null;
-  fulfillment_type: 'delivery' | 'pickup';
+  fulfillment_type: 'delivery' | 'pickup' | 'dine_in';
   schedule_type: 'asap' | 'scheduled';
   scheduled_for?: string | null;
   status: CanonicalOrderStatus;
+  payment_method?: string;
   payment_status: CanonicalPaymentStatus;
+  cash_change_for_cents?: number | null;
   subtotal_cents: number;
   delivery_fee_cents: number;
   discount_cents: number;
   total_cents: number;
   notes?: string | null;
   created_at: string;
+  updated_at?: string;
   items: Array<{
     id: string;
     snapshot_product_name: string;
@@ -94,6 +104,8 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
 
   const fetchOrder = useCallback(async () => {
     setIsLoading(true);
@@ -141,6 +153,31 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
       setActionError(err.message);
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleConfirmManualPayment = async () => {
+    if (!order) return;
+    setIsConfirmingPayment(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}/payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm_manual',
+          paymentMethod: order.payment_method || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Falha ao confirmar pagamento.');
+      }
+      await fetchOrder();
+    } catch (err: any) {
+      setActionError(err.message);
+    } finally {
+      setIsConfirmingPayment(false);
     }
   };
 
@@ -192,17 +229,40 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
           <span>Voltar aos Pedidos</span>
         </Link>
 
-        {order.public_tracking_token && (
-          <Link
-            href={`/pedido/${order.public_tracking_token}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-semibold transition-all shadow-sm self-start sm:self-auto"
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setShowPrintModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold transition-all shadow-sm"
           >
-            <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-            <span>Ver Rastreio do Cliente</span>
-          </Link>
-        )}
+            <Printer className="w-3.5 h-3.5" />
+            <span>Imprimir Comanda (58/80mm)</span>
+          </button>
+
+          {order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+            <button
+              type="button"
+              onClick={handleConfirmManualPayment}
+              disabled={isConfirmingPayment}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm disabled:opacity-60"
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>{isConfirmingPayment ? 'Confirmando...' : 'Confirmar Pagamento'}</span>
+            </button>
+          )}
+
+          {order.public_tracking_token && (
+            <Link
+              href={`/pedido/${order.public_tracking_token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-semibold transition-all shadow-sm"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+              <span>Ver Rastreio do Cliente</span>
+            </Link>
+          )}
+        </div>
       </div>
 
       {actionError && (
@@ -231,7 +291,12 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
               </Badge>
             </div>
             <p className="text-xs text-slate-500">
-              Registrado em {new Date(order.created_at).toLocaleString('pt-BR')}
+              Registrado em {new Date(order.created_at).toLocaleString('pt-BR')} • Canal:{' '}
+              <strong>{ORDER_CHANNEL_LABELS[(order.order_channel || 'website') as keyof typeof ORDER_CHANNEL_LABELS] || 'Site'}</strong> • Pagamento:{' '}
+              <strong>{PAYMENT_METHOD_LABELS[(order.payment_method || 'pix') as keyof typeof PAYMENT_METHOD_LABELS] || 'Pix'}</strong>
+              {order.payment_method === 'cash' && order.cash_change_for_cents
+                ? ` (Troco p/ ${formatBrl(order.cash_change_for_cents)})`
+                : ''}
             </p>
           </div>
 
@@ -463,6 +528,14 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
           </Card>
         </div>
       </div>
+
+      {showPrintModal && (
+        <OrderPrintModal
+          order={mapOrderDetailToOperationalOrder(order)}
+          tenantName="BENZA"
+          onClose={() => setShowPrintModal(false)}
+        />
+      )}
     </div>
   );
 }

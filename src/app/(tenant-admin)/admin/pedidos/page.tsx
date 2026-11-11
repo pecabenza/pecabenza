@@ -9,6 +9,8 @@ import {
   ChefHat,
   Truck,
   Store,
+  Utensils,
+  Zap,
   XCircle,
   PackageCheck,
   Search,
@@ -16,6 +18,9 @@ import {
   RefreshCw,
   Eye,
   Calendar,
+  Printer,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -24,22 +29,37 @@ import {
   CanonicalPaymentStatus,
   ORDER_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
+  ORDER_CHANNEL_LABELS,
+  PAYMENT_METHOD_LABELS,
 } from '@/modules/orders/order-status.machine';
 import { formatBrl } from '@/modules/cart/cart.utils';
+import type { FulfillmentType, OrderChannel, OrderPaymentMethod } from '@/types/database.types';
+import type { OperationalOrder } from '@/modules/orders/orders.service';
+import { OrderPrintModal } from '@/components/admin/orders/OrderPrintModal';
+import { mapOrderDetailToOperationalOrder } from '@/components/admin/orders/order-print-adapter';
+import {
+  isSoundEnabled,
+  setSoundEnabled,
+  playNewOrderChime,
+  checkAndNotifyNewOrders,
+} from '@/lib/audio/order-chime';
 
 interface AdminOrderSummary {
   id: string;
   order_number: string;
   public_tracking_token: string;
+  order_channel?: OrderChannel;
   customer_name: string;
   customer_phone: string;
-  fulfillment_type: 'delivery' | 'pickup';
+  fulfillment_type: FulfillmentType;
   schedule_type: 'asap' | 'scheduled';
   scheduled_for?: string | null;
   status: CanonicalOrderStatus;
+  payment_method?: OrderPaymentMethod;
   payment_status: CanonicalPaymentStatus;
   subtotal_cents: number;
   delivery_fee_cents: number;
+  discount_cents?: number;
   total_cents: number;
   created_at: string;
 }
@@ -48,28 +68,73 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<AdminOrderSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [channelFilter, setChannelFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [soundActive, setSoundActive] = useState(true);
+  const [printOrder, setPrintOrder] = useState<OperationalOrder | null>(null);
+  const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
 
-  const fetchOrders = useCallback(async () => {
-    setIsLoading(true);
+  useEffect(() => {
+    setSoundActive(isSoundEnabled());
+  }, []);
+
+  const handleToggleSound = () => {
+    const nextState = !soundActive;
+    setSoundActive(nextState);
+    setSoundEnabled(nextState);
+    if (nextState) {
+      playNewOrderChime();
+    }
+  };
+
+  const handleQuickPrint = async (orderId: string) => {
+    setPrintingOrderId(orderId);
     try {
-      const url = statusFilter !== 'all'
-        ? `/api/admin/orders?status=${statusFilter}`
-        : '/api/admin/orders';
+      const res = await fetch(`/api/admin/orders/${orderId}`);
+      if (res.ok) {
+        const detail = await res.json();
+        setPrintOrder(mapOrderDetailToOperationalOrder(detail));
+      }
+    } catch {
+      // Silencioso em falha momentânea
+    } finally {
+      setPrintingOrderId(null);
+    }
+  };
+
+  const fetchOrders = useCallback(async (isSilent = false) => {
+    if (!isSilent) setIsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (channelFilter !== 'all') params.set('channel', channelFilter);
+      const qs = params.toString();
+      const url = qs ? `/api/admin/orders?${qs}` : '/api/admin/orders';
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        setOrders(data.orders || []);
+        const nextOrders: AdminOrderSummary[] = data.orders || [];
+        if (statusFilter === 'all' && channelFilter === 'all') {
+          checkAndNotifyNewOrders(
+            nextOrders.map((o) => o.id),
+            isLoading
+          );
+        }
+        setOrders(nextOrders);
       }
     } catch {
       // Ignora erro de rede momentâneo
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, channelFilter, isLoading]);
 
   useEffect(() => {
     fetchOrders();
+    const interval = setInterval(() => {
+      fetchOrders(true);
+    }, 8000);
+    return () => clearInterval(interval);
   }, [fetchOrders]);
 
   const filteredOrders = orders.filter((o) => {
@@ -123,14 +188,36 @@ export default function AdminOrdersPage() {
           </p>
         </div>
 
-        <button
-          onClick={fetchOrders}
-          disabled={isLoading}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all shadow-sm self-start sm:self-auto"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          <span>Atualizar</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handleToggleSound}
+            title={soundActive ? 'Desativar alerta sonoro de novos pedidos' : 'Ativar alerta sonoro'}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all shadow-sm ${
+              soundActive
+                ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            {soundActive ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            <span>{soundActive ? 'Alerta Ativo' : 'Alerta Mudo'}</span>
+          </button>
+          <Link
+            href="/admin/pedido-rapido"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>+ Pedido Rápido</span>
+          </Link>
+          <button
+            onClick={() => fetchOrders()}
+            disabled={isLoading}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Atualizar</span>
+          </button>
+        </div>
       </div>
 
       {/* Barra de Filtros e Busca */}
@@ -175,6 +262,30 @@ export default function AdminOrdersPage() {
             ))}
           </div>
         </div>
+
+        {/* Filtro por Canal de Atendimento */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-slate-100 text-xs">
+          <span className="text-[11px] font-bold text-slate-400 uppercase mr-1">Canal:</span>
+          {[
+            { id: 'all', label: 'Todos Canais' },
+            { id: 'website', label: '🌐 Site' },
+            { id: 'whatsapp', label: '💬 WhatsApp' },
+            { id: 'phone', label: '📞 Telefone' },
+            { id: 'counter', label: '🏪 Balcão' },
+          ].map((ch) => (
+            <button
+              key={ch.id}
+              onClick={() => setChannelFilter(ch.id)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                channelFilter === ch.id
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
+              }`}
+            >
+              {ch.label}
+            </button>
+          ))}
+        </div>
       </Card>
 
       {/* Listagem em Tabela */}
@@ -211,7 +322,10 @@ export default function AdminOrdersPage() {
                   return (
                     <tr key={order.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4 font-bold text-slate-900">
-                        {order.order_number}
+                        <div>{order.order_number}</div>
+                        <span className="inline-block mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                          {ORDER_CHANNEL_LABELS[order.order_channel || 'website'] || 'Site'}
+                        </span>
                       </td>
                       <td className="py-3.5 px-4 text-slate-500 whitespace-nowrap">
                         {new Date(order.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -221,7 +335,7 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="py-3.5 px-4">
                         <span className="font-semibold text-slate-800 block">{order.customer_name}</span>
-                        <span className="text-[11px] text-slate-400 block">{order.customer_phone}</span>
+                        <span className="text-[11px] text-slate-400 block">{order.customer_phone || 'Balcão'}</span>
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 font-medium text-slate-700">
@@ -229,6 +343,11 @@ export default function AdminOrdersPage() {
                             <>
                               <Truck className="w-3.5 h-3.5 text-blue-600" />
                               <span>Entrega</span>
+                            </>
+                          ) : order.fulfillment_type === 'dine_in' ? (
+                            <>
+                              <Utensils className="w-3.5 h-3.5 text-purple-600" />
+                              <span>No Local</span>
                             </>
                           ) : (
                             <>
@@ -248,19 +367,34 @@ export default function AdminOrdersPage() {
                         {formatBrl(order.total_cents)}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        {getPaymentBadge(order.payment_status)}
+                        <div>{getPaymentBadge(order.payment_status)}</div>
+                        <span className="block text-[10px] text-slate-400">
+                          {PAYMENT_METHOD_LABELS[order.payment_method || 'pix'] || 'Pix'}
+                        </span>
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         {getStatusBadge(order.status)}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <Link
-                          href={`/admin/pedidos/${order.id}`}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition-all shadow-sm"
-                        >
-                          <Eye className="w-3 h-3" />
-                          <span>Ver</span>
-                        </Link>
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickPrint(order.id)}
+                            disabled={printingOrderId === order.id}
+                            title="Imprimir comanda térmica (58mm/80mm)"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-stone-100 text-stone-700 text-xs font-semibold hover:bg-stone-200 transition-all disabled:opacity-50"
+                          >
+                            <Printer className="w-3 h-3" />
+                            <span>{printingOrderId === order.id ? '...' : 'Imprimir'}</span>
+                          </button>
+                          <Link
+                            href={`/admin/pedidos/${order.id}`}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition-all shadow-sm"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Ver</span>
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -270,6 +404,14 @@ export default function AdminOrdersPage() {
           </div>
         )}
       </Card>
+
+      {printOrder && (
+        <OrderPrintModal
+          order={printOrder}
+          tenantName="BENZA"
+          onClose={() => setPrintOrder(null)}
+        />
+      )}
     </div>
   );
 }

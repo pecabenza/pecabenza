@@ -21,7 +21,7 @@ import {
   ContactSectionSchema,
   SocialSectionSchema,
 } from '@/modules/cms/schemas';
-import type { TenantPageSection, Product, TenantSettings } from '@/types/database.types';
+import type { TenantPageSection, Product, TenantSettings, SiteMode } from '@/types/database.types';
 
 interface SectionRendererProps {
   section: TenantPageSection;
@@ -29,6 +29,7 @@ interface SectionRendererProps {
   settings?: TenantSettings;
   tenantId?: string;
   prelaunchCtaText?: string;
+  siteMode?: SiteMode | null;
 }
 
 export function SectionRenderer({
@@ -37,6 +38,7 @@ export function SectionRenderer({
   settings,
   tenantId,
   prelaunchCtaText,
+  siteMode = 'commerce',
 }: SectionRendererProps) {
   if (!section.is_active) return null;
 
@@ -61,6 +63,7 @@ export function SectionRenderer({
             content={parsed}
             products={products}
             ctaButtonText={prelaunchCtaText}
+            siteMode={siteMode}
           />
         );
       }

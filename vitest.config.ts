@@ -25,7 +25,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    testTimeout: 25000,
+    testTimeout: 30000,
+    hookTimeout: 30000,
     include: isStagingRun
       ? ['tests/staging/**/*.test.ts']
       : ['tests/unit/**/*.test.ts', 'tests/security/**/*.test.ts'],

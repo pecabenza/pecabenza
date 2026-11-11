@@ -139,7 +139,7 @@ export default async function ProductsPage() {
                       <span>Ficha Completa</span>
                       <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                     </Link>
-                    <QuickAddToCartButton product={product} />
+                    <QuickAddToCartButton product={product} siteMode={tenant.site_mode} />
                   </div>
                 </div>
               </Card>

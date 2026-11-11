@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuthSession } from '@/lib/tenancy/admin-auth';
 import { listAdminOrders } from '@/modules/orders/orders.service';
 import { CanonicalOrderStatus } from '@/modules/orders/order-status.machine';
+import type { OrderChannel } from '@/types/database.types';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,11 +15,13 @@ export async function GET(request: NextRequest) {
 
     const url = new URL(request.url);
     const status = url.searchParams.get('status') as CanonicalOrderStatus | undefined;
+    const channel = url.searchParams.get('channel') as OrderChannel | undefined;
     const limit = Number(url.searchParams.get('limit')) || 50;
     const offset = Number(url.searchParams.get('offset')) || 0;
 
     const orders = await listAdminOrders(session.tenant.id, {
       status,
+      channel,
       limit,
       offset,
     });

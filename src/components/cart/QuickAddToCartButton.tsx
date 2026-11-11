@@ -3,15 +3,21 @@
 import React, { useState } from 'react';
 import { ShoppingBag, Check } from 'lucide-react';
 import { useCart } from '@/modules/cart/CartContext';
-import type { Product, ProductVariant } from '@/types/database.types';
+import { isCommerceEnabled } from '@/lib/tenancy/site-mode';
+import type { Product, ProductVariant, SiteMode } from '@/types/database.types';
 
 interface QuickAddToCartButtonProps {
   product: Product & { variants?: ProductVariant[] };
+  siteMode?: SiteMode | null;
 }
 
-export function QuickAddToCartButton({ product }: QuickAddToCartButtonProps) {
+export function QuickAddToCartButton({ product, siteMode = 'commerce' }: QuickAddToCartButtonProps) {
   const { addItem } = useCart();
   const [isAdded, setIsAdded] = useState(false);
+
+  if (!isCommerceEnabled(siteMode)) {
+    return null;
+  }
 
   const availableVariant =
     product.variants?.find((v) => v.is_available) || product.variants?.[0];

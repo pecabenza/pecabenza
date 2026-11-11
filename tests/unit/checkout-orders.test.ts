@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   validateCartItems,
   createOrderAtomic,
-  getTenantCommerceSettings,
 } from '../../src/modules/orders/orders.service';
 import {
   CartValidationInputSchema,
@@ -10,12 +9,142 @@ import {
 } from '../../src/modules/orders/orders.schema';
 import { isCommerceEnabled } from '../../src/lib/tenancy/site-mode';
 
-describe('Etapa 2A — Checkout Base, Regras do Servidor e Pedidos Transacionais', () => {
+const mockSupabaseState = {
+  realVariants: [] as any[],
+  stockSettings: [] as any[],
+  inventoryBatches: [] as any[],
+  commerceSettings: null as any,
+  businessHours: {
+    is_store_open: true,
+    enforce_schedule: false,
+    enabled_payment_methods: ['pix', 'cash', 'card_on_delivery'],
+  } as any,
+  existingIdempotentOrder: null as any,
+  rpcResult: {
+    data: { order_id: '00000000-0000-0000-0000-000000009001', order_number: '#000901' } as any,
+    error: null as any,
+  },
+};
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: vi.fn(() => ({
+    rpc: vi.fn(async () => mockSupabaseState.rpcResult),
+    from: vi.fn((table: string) => {
+      if (table === 'product_variants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              in: async () => ({ data: mockSupabaseState.realVariants, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'product_variant_stock_settings') {
+        return {
+          select: () => ({
+            eq: () => ({
+              in: async () => ({ data: mockSupabaseState.stockSettings, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'inventory_batches') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  gte: () => ({
+                    in: async () => ({ data: mockSupabaseState.inventoryBatches, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'tenant_commerce_settings') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: mockSupabaseState.commerceSettings, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'tenant_settings') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { business_hours: mockSupabaseState.businessHours },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'orders') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: mockSupabaseState.existingIdempotentOrder,
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+          update: () => ({
+            eq: () => ({
+              eq: () => ({
+                select: () => ({
+                  maybeSingle: async () => ({
+                    data: { public_tracking_token: 'mock-tracking-token-abc' },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'order_status_events') {
+        return {
+          insert: async () => ({ error: null }),
+        };
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: null, error: null }),
+          }),
+        }),
+      };
+    }),
+  })),
+}));
+
+describe('Etapa 2A & Fase B (B2) — Checkout Base, Estoque, Regras Comerciais e Atomicidade Estrita', () => {
   const TENANT_BENZA = '00000000-0000-0000-0000-000000000001';
-  const TENANT_CACAU = '00000000-0000-0000-0000-000000000002';
 
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    mockSupabaseState.realVariants = [];
+    mockSupabaseState.stockSettings = [];
+    mockSupabaseState.inventoryBatches = [];
+    mockSupabaseState.commerceSettings = null;
+    mockSupabaseState.businessHours = {
+      is_store_open: true,
+      enforce_schedule: false,
+      enabled_payment_methods: ['pix', 'cash', 'card_on_delivery'],
+    };
+    mockSupabaseState.existingIdempotentOrder = null;
+    mockSupabaseState.rpcResult = {
+      data: { order_id: '00000000-0000-0000-0000-000000009001', order_number: '#000901' },
+      error: null,
+    };
   });
 
   describe('1. Servidor como Única Fonte de Verdade & Mitigação de Adulteração de Preço', () => {
@@ -119,6 +248,7 @@ describe('Etapa 2A — Checkout Base, Regras do Servidor e Pedidos Transacionais
         },
         fulfillmentType: 'delivery' as const,
         scheduleType: 'asap' as const,
+        paymentMethod: 'pix' as const,
         address: {
           zipCode: '01310-100',
           street: 'Avenida Paulista',
@@ -154,6 +284,7 @@ describe('Etapa 2A — Checkout Base, Regras do Servidor e Pedidos Transacionais
         },
         fulfillmentType: 'pickup' as const,
         scheduleType: 'asap' as const,
+        paymentMethod: 'pix' as const,
       };
 
       const order = await createOrderAtomic(TENANT_BENZA, orderPayload, 'commerce');
@@ -223,6 +354,7 @@ describe('Etapa 2A — Checkout Base, Regras do Servidor e Pedidos Transacionais
         customer: { name: 'Cliente Teste', phone: '11999998888' },
         fulfillmentType: 'pickup' as const,
         scheduleType: 'asap' as const,
+        paymentMethod: 'pix' as const,
       };
 
       await expect(
@@ -243,6 +375,7 @@ describe('Etapa 2A — Checkout Base, Regras do Servidor e Pedidos Transacionais
         customer: { name: 'Cliente Teste', phone: '11999998888' },
         fulfillmentType: 'pickup' as const,
         scheduleType: 'asap' as const,
+        paymentMethod: 'pix' as const,
       };
 
       await expect(
@@ -255,6 +388,122 @@ describe('Etapa 2A — Checkout Base, Regras do Servidor e Pedidos Transacionais
       expect(isCommerceEnabled('prelaunch')).toBe(false);
       expect(isCommerceEnabled('institutional')).toBe(false);
       expect(isCommerceEnabled(null)).toBe(false);
+    });
+  });
+
+  describe('7. Fase B (B2) — Eliminação de Fallback Fictício, Loja Pausada, Pagamento e Estoque', () => {
+    const basePayload = {
+      items: [
+        {
+          productId: '00000000-0000-0000-0000-000000000101',
+          variantId: 'var-01',
+          quantity: 1,
+          clientPriceInCents: 4800,
+        },
+      ],
+      customer: { name: 'Cliente Real', phone: '11988887777' },
+      fulfillmentType: 'pickup' as const,
+      scheduleType: 'asap' as const,
+      paymentMethod: 'cash' as const,
+    };
+
+    it('NUNCA deve retornar sucesso fictício quando a RPC create_order_atomic falhar', async () => {
+      mockSupabaseState.rpcResult = {
+        data: null,
+        error: { message: 'deadlock detected on create_order_atomic' },
+      };
+
+      await expect(createOrderAtomic(TENANT_BENZA, basePayload, 'commerce')).rejects.toThrow(
+        'Falha ao registrar pedido no banco de dados'
+      );
+    });
+
+    it('NUNCA deve retornar sucesso fictício se o banco não devolver order_id e order_number', async () => {
+      mockSupabaseState.rpcResult = {
+        data: { order_id: null, order_number: null },
+        error: null,
+      };
+
+      await expect(createOrderAtomic(TENANT_BENZA, basePayload, 'commerce')).rejects.toThrow(
+        'Falha de integridade'
+      );
+    });
+
+    it('deve bloquear pedido quando a loja estiver pausada pelo operador', async () => {
+      mockSupabaseState.businessHours = {
+        is_store_open: false,
+        pause_reason: 'Cozinha em manutenção',
+        enforce_schedule: false,
+        enabled_payment_methods: ['pix', 'cash'],
+      };
+
+      await expect(createOrderAtomic(TENANT_BENZA, basePayload, 'commerce')).rejects.toThrow(
+        'Cozinha em manutenção'
+      );
+    });
+
+    it('deve bloquear forma de pagamento não habilitada na configuração comercial', async () => {
+      mockSupabaseState.businessHours = {
+        is_store_open: true,
+        enforce_schedule: false,
+        enabled_payment_methods: ['pix'],
+      };
+
+      await expect(createOrderAtomic(TENANT_BENZA, basePayload, 'commerce')).rejects.toThrow(
+        'não está habilitada'
+      );
+    });
+
+    it('deve validar estoque em lotes ativos exclusivamente quando track_inventory = true', async () => {
+      const realVarId = '00000000-0000-0000-0000-000000000501';
+      mockSupabaseState.realVariants = [
+        {
+          id: realVarId,
+          product_id: '00000000-0000-0000-0000-000000000401',
+          tenant_id: TENANT_BENZA,
+          name: 'Porção Individual',
+          price_in_cents: 4500,
+          is_available: true,
+          unit_value: 350,
+          unit_type: 'g',
+          product: {
+            id: '00000000-0000-0000-0000-000000000401',
+            name: 'Lasagna Artesanal',
+            status: 'active',
+            tenant_id: TENANT_BENZA,
+          },
+        },
+      ];
+      mockSupabaseState.stockSettings = [{ variant_id: realVarId, track_inventory: true }];
+      mockSupabaseState.inventoryBatches = [
+        { variant_id: realVarId, current_quantity: 1, reserved_quantity: 0 },
+      ];
+
+      const outOfStockResult = await validateCartItems(TENANT_BENZA, [
+        {
+          productId: '00000000-0000-0000-0000-000000000401',
+          variantId: realVarId,
+          quantity: 3,
+          clientPriceInCents: 4500,
+        },
+      ]);
+
+      expect(outOfStockResult.isValid).toBe(false);
+      expect(outOfStockResult.hasUnavailableItems).toBe(true);
+      expect(outOfStockResult.issues[0].message).toContain('Disponível: 1');
+
+      // Quando track_inventory = false, não bloqueia por ausência de lote
+      mockSupabaseState.stockSettings = [{ variant_id: realVarId, track_inventory: false }];
+      const untrackedResult = await validateCartItems(TENANT_BENZA, [
+        {
+          productId: '00000000-0000-0000-0000-000000000401',
+          variantId: realVarId,
+          quantity: 3,
+          clientPriceInCents: 4500,
+        },
+      ]);
+
+      expect(untrackedResult.isValid).toBe(true);
     });
   });
 });

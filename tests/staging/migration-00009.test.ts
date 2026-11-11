@@ -173,7 +173,8 @@ describe.skipIf(!isConfigured)('Validação Remota — Migration 00009 (Payments
       .eq('id', order.id)
       .single();
 
-    expect(updatedOrder?.status).toBe('paid');
+    // Com a migration 00010 (Etapa 2C), o status operacional é promovido para 'confirmed' e o financeiro para 'paid'
+    expect(updatedOrder?.status).toBe('confirmed');
     expect(updatedOrder?.payment_status).toBe('paid');
 
     // 5. Teste de Idempotência: reenvia exatamente o mesmo evento

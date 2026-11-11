@@ -26,16 +26,32 @@ export function StorefrontFooter({ tenant, settings }: StorefrontFooterProps) {
                 {settings.address_summary}
               </p>
             )}
-            {settings.business_hours && Object.keys(settings.business_hours).length > 0 && (
-              <div className="text-xs text-white/60 space-y-1 pt-2">
-                <span className="font-semibold text-white/80 block uppercase tracking-wider">Horários</span>
-                {Object.entries(settings.business_hours).map(([key, val]) => (
-                  <p key={key}>
-                    <span className="capitalize">{key}</span>: {val}
-                  </p>
-                ))}
-              </div>
-            )}
+            {(() => {
+              const rawHours = settings.business_hours as Record<string, unknown> | undefined;
+              const descriptiveEntries = rawHours
+                ? Object.entries(rawHours).filter(
+                    ([key, val]) =>
+                      typeof val === 'string' &&
+                      val.trim().length > 0 &&
+                      !['timezone', 'pause_reason'].includes(key)
+                  )
+                : [];
+              if (descriptiveEntries.length === 0) return null;
+              const labelMap: Record<string, string> = {
+                producao: 'Produção',
+                entregas: 'Entregas',
+              };
+              return (
+                <div className="text-xs text-white/60 space-y-1 pt-2">
+                  <span className="font-semibold text-white/80 block uppercase tracking-wider">Horários</span>
+                  {descriptiveEntries.map(([key, val]) => (
+                    <p key={key}>
+                      <span className="capitalize">{labelMap[key] || key}</span>: {String(val)}
+                    </p>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Quick Links */}

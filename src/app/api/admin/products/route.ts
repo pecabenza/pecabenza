@@ -5,6 +5,10 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createSafeErrorResponse } from '@/lib/security/error-response';
 import { sanitizePlainText } from '@/lib/security/sanitize';
 import { logger } from '@/lib/observability/logger';
+import {
+  resolveOrCreateCoverMediaId,
+  hydrateProductsWithCoverUrls,
+} from '@/modules/catalog/media-helper';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,10 +66,16 @@ export async function GET(request: NextRequest) {
         .order('display_order', { ascending: true }),
     ]);
 
+    const hydratedProducts = await hydrateProductsWithCoverUrls(
+      adminClient,
+      tenant.id,
+      productsRes.data || []
+    );
+
     return NextResponse.json({
       success: true,
       tenantId: tenant.id,
-      products: productsRes.data || [],
+      products: hydratedProducts,
       categories: categoriesRes.data || [],
     });
   } catch (error) {
@@ -132,7 +142,15 @@ export async function POST(request: NextRequest) {
         .replace(/^-+|-+$/g, '')
     );
 
-    // 3. Salvar produto
+    // 3. Resolver cover_media_id em media_assets (sem gravar coluna inexistente cover_image_url em products)
+    const coverMediaId = await resolveOrCreateCoverMediaId(
+      adminClient,
+      tenant.id,
+      validated.cover_image_url || null,
+      validated.asset_source
+    );
+
+    // 4. Salvar produto
     let productId = validated.id;
     let savedProduct;
 
@@ -146,7 +164,7 @@ export async function POST(request: NextRequest) {
           category_id: categoryId || null,
           short_description: validated.short_description ? sanitizePlainText(validated.short_description, 300) : null,
           full_description: validated.full_description ? sanitizePlainText(validated.full_description, 2000) : null,
-          cover_image_url: validated.cover_image_url || null,
+          cover_media_id: coverMediaId,
           asset_source: validated.asset_source,
           is_mockup: validated.is_mockup,
           status: validated.status,
@@ -160,7 +178,7 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         logger.error('Erro ao atualizar produto', { tenantId: tenant.id, error: error.message });
-        return NextResponse.json({ error: 'Erro ao atualizar produto no banco.' }, { status: 500 });
+        return NextResponse.json({ error: `Erro ao atualizar produto no banco: ${error.message}` }, { status: 500 });
       }
       savedProduct = data;
     } else {
@@ -174,7 +192,7 @@ export async function POST(request: NextRequest) {
           category_id: categoryId || null,
           short_description: validated.short_description ? sanitizePlainText(validated.short_description, 300) : null,
           full_description: validated.full_description ? sanitizePlainText(validated.full_description, 2000) : null,
-          cover_image_url: validated.cover_image_url || null,
+          cover_media_id: coverMediaId,
           asset_source: validated.asset_source,
           is_mockup: validated.is_mockup,
           status: validated.status,
@@ -185,7 +203,7 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         logger.error('Erro ao cadastrar produto', { tenantId: tenant.id, error: error.message });
-        return NextResponse.json({ error: 'Erro ao cadastrar novo produto no banco.' }, { status: 500 });
+        return NextResponse.json({ error: `Erro ao cadastrar novo produto no banco: ${error.message}` }, { status: 500 });
       }
       savedProduct = data;
       productId = data.id;
@@ -273,7 +291,7 @@ export async function POST(request: NextRequest) {
     // 6. Registrar em audit_logs
     await adminClient.from('audit_logs').insert({
       tenant_id: tenant.id,
-      user_id: user.id,
+      actor_id: user.id,
       resource_type: 'products',
       resource_id: productId,
       action: validated.id ? 'UPDATE_PRODUCT' : 'CREATE_PRODUCT',
@@ -284,9 +302,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const [hydratedSaved] = await hydrateProductsWithCoverUrls(adminClient, tenant.id, [savedProduct]);
+
     return NextResponse.json({
       success: true,
-      product: savedProduct,
+      product: hydratedSaved || savedProduct,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
