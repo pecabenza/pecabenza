@@ -29,6 +29,8 @@ interface AdminLayoutShellProps {
   tenantName: string;
   tenantSlug: string;
   role: TenantRole;
+  logoUrl?: string | null;
+  sidebarColor?: string | null;
   children: React.ReactNode;
 }
 
@@ -36,12 +38,19 @@ export function AdminLayoutShell({
   tenantName,
   tenantSlug,
   role,
+  logoUrl,
+  sidebarColor,
   children,
 }: AdminLayoutShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoError, setLogoError] = useState(false);
+
+  const effectiveSidebarBg = sidebarColor || '#1C1917';
+  const effectiveLogoUrl =
+    !logoError && (logoUrl || (tenantSlug === 'benza' ? '/assets/brands/benza/logo-white.svg' : null));
 
   const navigation = [
     { name: 'Visão Geral', href: '/admin', icon: LayoutDashboard },
@@ -68,19 +77,31 @@ export function AdminLayoutShell({
     } catch {
       // continua para redirecionamento
     }
-    router.push('/admin/login');
+    router.push('/login');
     router.refresh();
   };
 
   return (
     <div className="min-h-screen bg-stone-100 flex flex-col md:flex-row text-stone-800 font-sans">
       {/* Mobile Header */}
-      <div className="md:hidden flex items-center justify-between bg-stone-900 text-white px-4 py-3 border-b border-stone-800 sticky top-0 z-50">
+      <div
+        className="md:hidden flex items-center justify-between text-white px-4 py-3 border-b border-white/10 sticky top-0 z-50"
+        style={{ backgroundColor: effectiveSidebarBg }}
+      >
         <div className="flex items-center gap-2">
-          <span className="font-bold tracking-tight text-amber-500 font-heading text-lg">
-            {tenantName}
-          </span>
-          <span className="text-[11px] bg-stone-800 px-2 py-0.5 rounded text-stone-400 capitalize">
+          {effectiveLogoUrl ? (
+            <img
+              src={effectiveLogoUrl}
+              alt={tenantName}
+              onError={() => setLogoError(true)}
+              className="h-9 w-auto max-w-[160px] object-contain"
+            />
+          ) : (
+            <span className="font-bold tracking-tight text-amber-500 font-heading text-lg">
+              {tenantName}
+            </span>
+          )}
+          <span className="text-[11px] bg-black/25 px-2 py-0.5 rounded text-stone-300 capitalize">
             {role.replace('tenant_', '')}
           </span>
         </div>
@@ -95,16 +116,26 @@ export function AdminLayoutShell({
 
       {/* Sidebar Desktop e Mobile Drawer */}
       <aside
-        className={`${sidebarOpen ? 'block' : 'hidden'
-          } md:block w-full md:w-64 bg-stone-900 text-stone-300 flex-shrink-0 flex flex-col justify-between fixed md:sticky top-0 md:top-0 h-auto md:h-screen z-40`}
+        className={`${sidebarOpen ? 'flex' : 'hidden'
+          } md:flex flex-col justify-between w-full md:w-64 text-stone-300 flex-shrink-0 fixed md:sticky top-0 left-0 h-dvh md:h-screen overflow-hidden z-40`}
+        style={{ backgroundColor: effectiveSidebarBg }}
       >
-        <div className="p-6 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
           <div className="hidden md:flex items-center justify-between">
-            <div>
-              <span className="font-heading text-xl font-bold tracking-tight text-white block">
-                {tenantName}
-              </span>
-              <span className="text-xs text-stone-500">Gestão Institucional & CMS</span>
+            <div className="space-y-1">
+              {effectiveLogoUrl ? (
+                <img
+                  src={effectiveLogoUrl}
+                  alt={tenantName}
+                  onError={() => setLogoError(true)}
+                  className="h-14 w-auto max-w-[210px] object-contain"
+                />
+              ) : (
+                <span className="font-heading text-xl font-bold tracking-tight text-white block">
+                  {tenantName}
+                </span>
+              )}
+              <span className="text-xs text-white-400 block">Gestão comercial</span>
             </div>
           </div>
 
@@ -119,8 +150,8 @@ export function AdminLayoutShell({
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
                   className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive
-                      ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
-                      : 'hover:bg-stone-800 text-stone-300 hover:text-white'
+                    ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                    : 'hover:bg-stone-800 text-stone-300 hover:text-white'
                     }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
@@ -132,7 +163,10 @@ export function AdminLayoutShell({
         </div>
 
         {/* Rodapé da Sidebar */}
-        <div className="p-4 border-t border-stone-800 space-y-2">
+        <div
+          className="shrink-0 p-4 border-t border-white/10 space-y-2"
+          style={{ backgroundColor: effectiveSidebarBg }}
+        >
           <Link
             href="/"
             target="_blank"
@@ -159,8 +193,8 @@ export function AdminLayoutShell({
         <div
           className={
             pathname.startsWith('/admin/kds') ||
-            pathname === '/admin/operacao' ||
-            pathname === '/admin/pedido-rapido'
+              pathname === '/admin/operacao' ||
+              pathname === '/admin/pedido-rapido'
               ? 'max-w-[1800px] mx-auto'
               : 'max-w-6xl mx-auto'
           }

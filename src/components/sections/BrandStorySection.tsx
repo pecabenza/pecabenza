@@ -59,6 +59,8 @@ export function BrandStorySection({ content }: BrandStorySectionProps) {
                   src={content.image_url}
                   alt={content.title}
                   fill
+                  loading="lazy"
+                  sizes="(max-width: 1024px) 100vw, 42vw"
                   className="object-cover"
                 />
               ) : (

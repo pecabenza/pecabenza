@@ -138,7 +138,7 @@ export function OperationalOrderCard({
 
   return (
     <div
-      className={`bg-white rounded-xl shadow-sm border transition-all duration-200 flex flex-col justify-between ${
+      className={`bg-white rounded-xl shadow-sm border transition-all duration-200 flex flex-col justify-between min-w-0 overflow-hidden ${
         order.isDelayed
           ? 'border-red-400 ring-2 ring-red-400/20'
           : order.isUrgent
@@ -147,51 +147,50 @@ export function OperationalOrderCard({
       }`}
     >
       {/* Top Header */}
-      <div className="p-3.5 pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-heading font-black text-lg text-stone-900 tracking-tight">
-                {order.orderNumber}
-              </span>
-              <span
-                className={`text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1 ${getTimeBadgeColor()}`}
-              >
-                <Clock className="w-3 h-3" />
-                {order.elapsedMinutes}m
-              </span>
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
-                  order.orderChannel === 'whatsapp'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : order.orderChannel === 'phone'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : order.orderChannel === 'counter'
-                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                    : 'bg-stone-100 text-stone-600'
-                }`}
-              >
-                {order.orderChannel === 'whatsapp' ? (
-                  <MessageCircle className="w-2.5 h-2.5" />
-                ) : order.orderChannel === 'phone' ? (
-                  <Phone className="w-2.5 h-2.5" />
-                ) : order.orderChannel === 'counter' ? (
-                  <Store className="w-2.5 h-2.5" />
-                ) : (
-                  <Globe className="w-2.5 h-2.5" />
-                )}
-                {ORDER_CHANNEL_LABELS[order.orderChannel || 'website'] || 'Site'}
-              </span>
-            </div>
-            <div className="text-xs font-bold text-stone-800 mt-0.5 truncate max-w-[190px]">
-              {order.customerName}
-            </div>
+      <div className="p-3.5 pb-2 min-w-0">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-heading font-black text-lg text-stone-900 tracking-tight">
+              {order.orderNumber}
+            </span>
+            <span
+              className={`text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1 whitespace-nowrap ${getTimeBadgeColor()}`}
+            >
+              <Clock className="w-3 h-3" />
+              {order.elapsedMinutes}m
+            </span>
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 whitespace-nowrap ${
+                order.orderChannel === 'whatsapp'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : order.orderChannel === 'phone'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : order.orderChannel === 'counter'
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                  : 'bg-stone-100 text-stone-600'
+              }`}
+            >
+              {order.orderChannel === 'whatsapp' ? (
+                <MessageCircle className="w-2.5 h-2.5" />
+              ) : order.orderChannel === 'phone' ? (
+                <Phone className="w-2.5 h-2.5" />
+              ) : order.orderChannel === 'counter' ? (
+                <Store className="w-2.5 h-2.5" />
+              ) : (
+                <Globe className="w-2.5 h-2.5" />
+              )}
+              {ORDER_CHANNEL_LABELS[order.orderChannel || 'website'] || 'Site'}
+            </span>
+          </div>
+
+          <div className="text-xs font-bold text-stone-800 mt-1 truncate">
+            {order.customerName}
           </div>
 
           {/* Badges de Modalidade e Pagamento */}
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
             <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-flex items-center gap-1 whitespace-nowrap ${
                 order.fulfillmentType === 'delivery'
                   ? 'bg-blue-50 text-blue-700 border border-blue-200'
                   : order.fulfillmentType === 'dine_in'
@@ -215,7 +214,7 @@ export function OperationalOrderCard({
             </span>
 
             <span
-              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded inline-flex items-center gap-1 whitespace-nowrap ${
                 order.paymentStatus === 'paid'
                   ? 'bg-emerald-100 text-emerald-800'
                   : 'bg-amber-100 text-amber-800'

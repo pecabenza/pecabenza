@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { resolveTenantByHost } from '@/lib/tenancy/context';
+import { getTenantPublicOrigin } from '@/lib/tenancy/origin';
 import { Container } from '@/components/ui/Container';
 import { ShieldCheck, Lock, Eye, Trash2, Mail } from 'lucide-react';
 
@@ -16,20 +17,22 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 
   const { tenant } = tenantContext;
+  const origin = getTenantPublicOrigin(tenantContext);
   const title = `Política de Privacidade e Proteção de Dados | ${tenant.name}`;
   const description = `Conheça como a ${tenant.name} coleta, trata e protege seus dados pessoais em total conformidade com a LGPD (Lei nº 13.709/2018).`;
 
   return {
+    metadataBase: new URL(origin),
     title,
     description,
     alternates: {
-      canonical: `https://${host}/privacidade`,
+      canonical: `${origin}/privacidade`,
     },
     openGraph: {
       title,
       description,
       type: 'website',
-      url: `https://${host}/privacidade`,
+      url: `${origin}/privacidade`,
       siteName: tenant.name,
     },
   };

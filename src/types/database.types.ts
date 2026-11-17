@@ -68,6 +68,9 @@ export interface TenantBranding {
   color_background: string;
   color_surface: string;
   color_text: string;
+  color_admin_sidebar?: string | null;
+  color_button?: string | null;
+  color_button_hover?: string | null;
   border_radius: string;
   created_at: string;
   updated_at: string;
@@ -110,6 +113,7 @@ export interface ProductVariant {
   unit_type: UnitType;
   unit_value: number;
   price_in_cents: number;
+  compare_at_price_cents?: number | null;
   is_available: boolean;
   display_order: number;
   created_at: string;
@@ -130,6 +134,38 @@ export interface ProductInformation {
   preparation_instructions: string | null;
   nutritional_info: Record<string, string>;
   created_at: string;
+}
+
+export interface ProductModifierOption {
+  id: string;
+  tenant_id: string;
+  group_id: string;
+  name: string;
+  price_in_cents: number;
+  is_available: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export interface ProductModifierGroup {
+  id: string;
+  tenant_id: string;
+  product_id: string;
+  name: string;
+  is_required: boolean;
+  min_selections: number;
+  max_selections: number;
+  display_order: number;
+  created_at: string;
+  options?: ProductModifierOption[];
+}
+
+export interface SelectedModifierSnapshot {
+  groupId: string;
+  groupName: string;
+  optionId: string;
+  optionName: string;
+  priceInCents: number;
 }
 
 export interface Product {
@@ -154,6 +190,9 @@ export interface Product {
   variants?: ProductVariant[];
   information?: ProductInformation | null;
   category?: ProductCategory | null;
+  modifier_groups?: ProductModifierGroup[];
+  suggested_product_ids?: string[];
+  suggestions?: Product[];
 }
 
 export interface TenantPage {

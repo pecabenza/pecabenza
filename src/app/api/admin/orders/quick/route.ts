@@ -11,6 +11,7 @@ import {
   listProductionStations,
 } from '@/modules/orders/orders.service';
 import { PaymentService } from '@/modules/payments/payment.service';
+import { parseStructuredBusinessHours } from '@/modules/commerce/store-config.engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,9 @@ export async function GET(request: NextRequest) {
       { data: products },
       { data: variants },
       { data: prodSteps },
+      { data: modifierGroups },
+      { data: modifierOptions },
+      { data: tenantSettingsRow },
       commerceSettings,
       stations,
     ] = await Promise.all([
@@ -66,6 +70,22 @@ export async function GET(request: NextRequest) {
         .eq('tenant_id', tenantId)
         .eq('is_active', true)
         .order('step_order', { ascending: true }),
+      supabase
+        .from('product_modifier_groups')
+        .select('id, tenant_id, product_id, name, is_required, min_selections, max_selections, display_order, created_at')
+        .eq('tenant_id', tenantId)
+        .order('display_order', { ascending: true }),
+      supabase
+        .from('product_modifier_options')
+        .select('id, tenant_id, group_id, name, price_in_cents, is_available, display_order, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('is_available', true)
+        .order('display_order', { ascending: true }),
+      supabase
+        .from('tenant_settings')
+        .select('business_hours')
+        .eq('tenant_id', tenantId)
+        .maybeSingle(),
       getTenantCommerceSettings(tenantId),
       listProductionStations(tenantId, false),
     ]);
@@ -76,6 +96,26 @@ export async function GET(request: NextRequest) {
       const arr = variantsByProduct.get(v.product_id) || [];
       arr.push(v);
       variantsByProduct.set(v.product_id, arr);
+    });
+
+    const optionsByGroup = new Map<string, any[]>();
+    (modifierOptions || []).forEach((opt) => {
+      const arr = optionsByGroup.get(opt.group_id) || [];
+      arr.push(opt);
+      optionsByGroup.set(opt.group_id, arr);
+    });
+
+    const modifierGroupsByProduct = new Map<string, any[]>();
+    (modifierGroups || []).forEach((grp) => {
+      const opts = optionsByGroup.get(grp.id) || [];
+      if (opts.length > 0 || grp.is_required) {
+        const arr = modifierGroupsByProduct.get(grp.product_id) || [];
+        arr.push({
+          ...grp,
+          options: opts,
+        });
+        modifierGroupsByProduct.set(grp.product_id, arr);
+      }
     });
 
     const stepsByProduct = new Map<string, string[]>();
@@ -94,9 +134,14 @@ export async function GET(request: NextRequest) {
       .map((p) => ({
         ...p,
         variants: variantsByProduct.get(p.id) || [],
+        modifierGroups: modifierGroupsByProduct.get(p.id) || [],
         stationNames: stepsByProduct.get(p.id) || [],
       }))
       .filter((p) => p.variants.length > 0);
+
+    const parsedHours = parseStructuredBusinessHours(
+      (tenantSettingsRow as { business_hours?: Record<string, any> } | null)?.business_hours
+    );
 
     return NextResponse.json(
       {
@@ -113,6 +158,7 @@ export async function GET(request: NextRequest) {
         categories: categories || [],
         catalog: activeCatalog,
         commerceSettings,
+        dineInEnabled: Boolean(parsedHours.dine_in_enabled),
         stations,
       },
       { status: 200 }
@@ -157,7 +203,7 @@ export async function POST(request: NextRequest) {
       },
       address: raw.address
         ? {
-            zipCode: sanitizePlainText(raw.address.zipCode),
+            zipCode: raw.address.zipCode ? sanitizePlainText(raw.address.zipCode) : '',
             street: sanitizePlainText(raw.address.street),
             number: sanitizePlainText(raw.address.number),
             complement: raw.address.complement ? sanitizePlainText(raw.address.complement) : undefined,
@@ -168,6 +214,9 @@ export async function POST(request: NextRequest) {
           }
         : undefined,
       notes: raw.notes ? sanitizePlainText(raw.notes) : undefined,
+      orderNumberOverride: raw.orderNumberOverride
+        ? sanitizePlainText(raw.orderNumberOverride, 30)
+        : undefined,
     };
 
     const origin = request.headers.get('origin') || new URL(request.url).origin;

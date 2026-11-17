@@ -27,16 +27,16 @@ export function StorefrontHeader({ tenant, branding, settings }: StorefrontHeade
   return (
     <header className="sticky top-0 z-40 bg-tenant-background/90 backdrop-blur-md border-b border-tenant-border/50 transition-all">
       <Container size="lg">
-        <div className="flex items-center justify-between h-20">
+        <div className="flex items-center justify-between h-24">
           {/* Logo / Brand Name */}
           <Link href="/" className="flex items-center gap-3 group focus:outline-none">
             {branding.logo_url ? (
               <Image
                 src={branding.logo_url}
                 alt={tenant.name}
-                width={140}
-                height={48}
-                className="h-10 w-auto object-contain"
+                width={220}
+                height={72}
+                className="h-14 sm:h-16 w-auto object-contain"
                 priority
               />
             ) : (

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ShoppingBag, Check } from 'lucide-react';
+import Link from 'next/link';
+import { ShoppingBag, Check, SlidersHorizontal } from 'lucide-react';
 import { useCart } from '@/modules/cart/CartContext';
 import { isCommerceEnabled } from '@/lib/tenancy/site-mode';
 import type { Product, ProductVariant, SiteMode } from '@/types/database.types';
@@ -19,10 +20,40 @@ export function QuickAddToCartButton({ product, siteMode = 'commerce' }: QuickAd
     return null;
   }
 
-  const availableVariant =
-    product.variants?.find((v) => v.is_available) || product.variants?.[0];
+  const availableVariants = (product.variants || []).filter((v) => v.is_available !== false);
+  const availableVariant = availableVariants[0];
 
-  if (!availableVariant) return null;
+  if (!product.variants || product.variants.length === 0) return null;
+
+  if (!availableVariant) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="inline-flex items-center justify-center px-3 py-2 rounded-tenant text-xs font-semibold bg-stone-200 text-stone-500 cursor-not-allowed"
+        aria-label={`${product.name} indisponível`}
+      >
+        Indisponível
+      </button>
+    );
+  }
+
+  const hasRequiredModifiers = Boolean(
+    product.modifier_groups?.some((g) => g.is_required || g.min_selections > 0)
+  );
+
+  if (hasRequiredModifiers) {
+    return (
+      <Link
+        href={`/produtos/${product.slug}`}
+        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-tenant text-xs font-semibold bg-tenant-primary text-white hover:brightness-110 shadow-xs transition-all"
+        title={`Escolher opções para ${product.name}`}
+      >
+        <SlidersHorizontal className="w-3.5 h-3.5" />
+        <span>Escolher</span>
+      </Link>
+    );
+  }
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.preventDefault();

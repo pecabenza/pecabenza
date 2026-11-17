@@ -9,6 +9,8 @@
   --color-background: #FDFBF7;
   --color-surface: #FFFFFF;
   --color-text: #1C1917;
+  --color-button: #A84B2C;
+  --color-button-hover: #8E3D22;
   --color-muted: #78716C;
   --color-border: #E7E5E4;
   --border-radius: 0.75rem;
@@ -38,4 +40,15 @@ h1, h2, h3, h4, h5, h6 {
 ::-webkit-scrollbar-thumb {
   background: var(--color-muted);
   border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

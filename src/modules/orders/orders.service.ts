@@ -21,6 +21,14 @@ import type {
 } from '@/types/database.types';
 import { isCommerceEnabled, getCommerceDisabledMessage } from '@/lib/tenancy/site-mode';
 import { formatBrl } from '@/modules/cart/cart.utils';
+import { validateAndResolveModifiers } from '../catalog/modifiers';
+import {
+  generateShortTrackingToken,
+  generateUniqueShortTrackingToken,
+  isValidPublicTrackingToken,
+  toShortTrackingToken,
+} from './tracking-token';
+import { DEFAULT_DELIVERED_THANK_YOU_MESSAGE } from '@/modules/commerce/store-config.engine';
 import {
   CanonicalOrderStatus,
   CanonicalPaymentStatus,
@@ -258,7 +266,30 @@ export async function validateCartItems(
     }
   }
 
+    // 1.2 Carregar grupos de complementos dos produtos reais (se migration 00017 existir)
+  const modifierGroupsByProduct = new Map<string, any[]>();
+  if (realVariants.length > 0) {
+    try {
+      const productIds = Array.from(new Set(realVariants.map((v: any) => v.product_id)));
+      const { data: modGroups } = await supabase
+        .from('product_modifier_groups')
+        .select('*, options:product_modifier_options(*)')
+        .eq('tenant_id', tenantId)
+        .in('product_id', productIds)
+        .order('display_order', { ascending: true });
+
+      for (const g of modGroups || []) {
+        const list = modifierGroupsByProduct.get(g.product_id) || [];
+        list.push(g);
+        modifierGroupsByProduct.set(g.product_id, list);
+      }
+    } catch {
+      // Tabelas de complementos opcionais
+    }
+  }
+
   // 2. Iterar sobre cada item solicitado pelo cliente
+  const cumulativeQtyByVariant = new Map<string, number>();
   for (const item of items) {
     let foundVariant = realVariants.find((v) => v.id === item.variantId);
     let foundProduct = foundVariant?.product;
@@ -335,9 +366,13 @@ export async function validateCartItems(
     }
 
     // Validação de saldo físico em estoque (somente quando track_inventory = true na Etapa 3D)
+    const cumulativeVariantQty =
+      (cumulativeQtyByVariant.get(foundVariant.id) || 0) + item.quantity;
+    cumulativeQtyByVariant.set(foundVariant.id, cumulativeVariantQty);
+
     if (strictlyTrackedVariantIds.has(foundVariant.id)) {
       const availableQty = trackedStockAvailableMap.get(foundVariant.id) || 0;
-      if (availableQty < item.quantity) {
+      if (availableQty < cumulativeVariantQty) {
         issues.push({
           type: 'unavailable',
           message:
@@ -351,8 +386,32 @@ export async function validateCartItems(
       }
     }
 
-    // Preço oficial do banco (servidor como fonte de verdade)
-    const officialPriceInCents = Number(foundVariant.price_in_cents);
+    // Validação de complementos / adicionais (se o produto possuir grupos configurados)
+    const productModifierGroups = modifierGroupsByProduct.get(foundProduct.id) || [];
+    const modifierValidation = validateAndResolveModifiers(
+      productModifierGroups,
+      item.selectedModifierOptionIds || []
+    );
+    if (!modifierValidation.valid) {
+      issues.push({
+        type: 'unavailable',
+        message: modifierValidation.error || `Complementos inválidos para "${foundProduct.name}".`,
+        variantId: item.variantId,
+        productId: foundProduct.id,
+      });
+      continue;
+    }
+
+    // Preço oficial do banco (servidor como fonte de verdade) + complementos
+    const officialPriceInCents =
+      Number(foundVariant.price_in_cents) + modifierValidation.extraPriceCents;
+
+    const modifierSummary = modifierValidation.selectedSnapshots
+      .map((m) => m.optionName)
+      .join(', ');
+    const snapshotVariantName = modifierSummary
+      ? `${foundVariant.name} (+ ${modifierSummary})`.slice(0, 100)
+      : foundVariant.name;
 
     // Detecção de alteração de preço em relação ao que o navegador tinha em cache
     if (
@@ -361,7 +420,7 @@ export async function validateCartItems(
     ) {
       issues.push({
         type: 'price_change',
-        message: `O preço de "${foundProduct.name} (${foundVariant.name})" foi atualizado de ${formatBrl(item.clientPriceInCents)} para ${formatBrl(officialPriceInCents)}. Revise seu pedido.`,
+        message: `O preço de "${foundProduct.name} (${snapshotVariantName})" foi atualizado de ${formatBrl(item.clientPriceInCents)} para ${formatBrl(officialPriceInCents)}. Revise seu pedido.`,
         variantId: item.variantId,
         productId: foundProduct.id,
         oldPriceInCents: item.clientPriceInCents,
@@ -375,7 +434,7 @@ export async function validateCartItems(
       productId: foundProduct.id,
       productName: foundProduct.name,
       variantId: foundVariant.id,
-      variantName: foundVariant.name,
+      variantName: snapshotVariantName,
       unitValue: foundVariant.unit_value,
       unitType: foundVariant.unit_type,
       coverImageUrl: foundProduct.cover_image_url,
@@ -555,7 +614,7 @@ export async function createOrderAtomic(
         }
       : null;
 
-  let publicTrackingToken = crypto.randomBytes(24).toString('hex');
+  let publicTrackingToken = generateShortTrackingToken();
 
   const { data: rpcData, error: rpcError } = await supabase.rpc('create_order_atomic', {
     p_tenant_id: tenantId,
@@ -771,17 +830,14 @@ export async function updateOrderStatus(
 /**
  * Consulta pública e segura de acompanhamento de pedido (Sem vazamento de PII)
  */
-export async function getPublicOrderTracking(publicToken: string) {
-  if (!publicToken || typeof publicToken !== 'string' || publicToken.length < 16) {
+export async function getPublicOrderTracking(publicToken: string, tenantId?: string) {
+  if (!isValidPublicTrackingToken(publicToken)) {
     return null;
   }
 
   const supabase = createAdminClient();
 
-  // 1. Busca pedido via token público seguro não-enumerável
-  const { data: order, error: orderErr } = await supabase
-    .from('orders')
-    .select(`
+  const selectCols = `
       id,
       tenant_id,
       order_number,
@@ -798,11 +854,40 @@ export async function getPublicOrderTracking(publicToken: string) {
       created_at,
       customer_name,
       customer_phone
-    `)
+    `;
+
+  // 1. Busca pedido via token público seguro (exato ou prefixo curto de 10 chars para pedidos legados)
+  let { data: order, error: orderErr } = await supabase
+    .from('orders')
+    .select(selectCols)
     .eq('public_tracking_token', publicToken)
     .maybeSingle();
 
+  if (!order && !orderErr && publicToken.length >= 8 && publicToken.length <= 16) {
+    try {
+      const prefixQuery = supabase
+        .from('orders')
+        .select(selectCols) as any;
+      if (typeof prefixQuery?.ilike === 'function') {
+        const fallback = await prefixQuery
+          .ilike('public_tracking_token', `${publicToken}%`)
+          .limit(1)
+          .maybeSingle();
+        if (fallback?.data) {
+          order = fallback.data;
+          orderErr = fallback.error;
+        }
+      }
+    } catch {
+      // ignora se mock não implementar ilike
+    }
+  }
+
   if (orderErr || !order) {
+    return null;
+  }
+
+  if (tenantId && order.tenant_id && order.tenant_id !== tenantId) {
     return null;
   }
 
@@ -848,6 +933,27 @@ export async function getPublicOrderTracking(publicToken: string) {
     }
   }
 
+  // 5b. Busca nota configurável de agradecimento após entrega
+  let deliveredThankYouMessage = DEFAULT_DELIVERED_THANK_YOU_MESSAGE;
+  if (order.status === 'delivered') {
+    try {
+      const { data: commerceSettings } = await supabase
+        .from('tenant_commerce_settings')
+        .select('business_hours')
+        .eq('tenant_id', order.tenant_id)
+        .maybeSingle();
+
+      const parsedHours = parseStructuredBusinessHours(
+        commerceSettings?.business_hours as Record<string, any> | null
+      );
+      if (parsedHours.delivered_thank_you_message) {
+        deliveredThankYouMessage = parsedHours.delivered_thank_you_message;
+      }
+    } catch {
+      // Fallback para a mensagem padrão
+    }
+  }
+
   // 6. Mascaramento estrito de PII
   const rawName = order.customer_name || 'Cliente';
   const nameParts = rawName.trim().split(' ');
@@ -862,7 +968,7 @@ export async function getPublicOrderTracking(publicToken: string) {
 
   return {
     orderNumber: order.order_number,
-    publicTrackingToken: order.public_tracking_token,
+    publicTrackingToken: toShortTrackingToken(order.public_tracking_token),
     status: order.status as CanonicalOrderStatus,
     statusLabel: ORDER_STATUS_LABELS[order.status as CanonicalOrderStatus] || order.status,
     paymentStatus: order.payment_status as CanonicalPaymentStatus,
@@ -880,6 +986,7 @@ export async function getPublicOrderTracking(publicToken: string) {
     },
     address: safeAddress,
     delivery: deliveryInfo,
+    deliveredThankYouMessage: order.status === 'delivered' ? deliveredThankYouMessage : null,
     items: (items || []).map((it) => ({
       name: it.snapshot_product_name,
       variant: it.snapshot_variant_name,
@@ -944,6 +1051,7 @@ export async function getAdminOrder(tenantId: string, orderId: string) {
 
   return {
     ...order,
+    public_tracking_token: toShortTrackingToken(order.public_tracking_token),
     items: items || [],
     address: address || null,
     timeline: events || [],
@@ -1008,7 +1116,10 @@ export async function listAdminOrders(
     throw new Error(`Erro ao listar pedidos: ${error.message}`);
   }
 
-  return orders || [];
+  return (orders || []).map((o) => ({
+    ...o,
+    public_tracking_token: toShortTrackingToken(o.public_tracking_token),
+  }));
 }
 
 export interface OperationalOrderItem {
@@ -1221,7 +1332,7 @@ export async function listOperationalOrders(tenantId: string): Promise<{
       id: order.id,
       tenantId: order.tenant_id,
       orderNumber: order.order_number,
-      publicTrackingToken: order.public_tracking_token,
+      publicTrackingToken: toShortTrackingToken(order.public_tracking_token),
       orderChannel: (order.order_channel || 'website') as OrderChannel,
       customerName: order.customer_name,
       customerPhone: order.customer_phone,
@@ -2756,6 +2867,28 @@ export async function createQuickOrder(
     : 'pending';
 
   const supabase = createAdminClient();
+
+  let customOrderNumber: string | null = null;
+  if (input.orderNumberOverride && input.orderNumberOverride.trim()) {
+    const trimmedOrderNumber = input.orderNumberOverride.trim().slice(0, 30);
+    customOrderNumber = /^\d+$/.test(trimmedOrderNumber)
+      ? `#${trimmedOrderNumber}`
+      : trimmedOrderNumber;
+
+    const { data: existingOrderNumber } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('order_number', customOrderNumber)
+      .maybeSingle();
+
+    if (existingOrderNumber) {
+      throw new Error(
+        `Já existe um pedido com o número "${customOrderNumber}". Escolha outro número ou deixe em branco para gerar automaticamente.`
+      );
+    }
+  }
+
   const rpcItemsPayload = validation.validatedItems.map((it) => ({
     product_id: it.productId,
     variant_id: it.variantId,
@@ -2782,7 +2915,7 @@ export async function createQuickOrder(
 
   let orderId = crypto.randomUUID();
   let orderNumber = `#${String(Math.floor(100000 + Math.random() * 900000)).slice(0, 6)}`;
-  let publicTrackingToken = crypto.randomBytes(24).toString('hex');
+  let publicTrackingToken = await generateUniqueShortTrackingToken(supabase);
   let isIdempotent = false;
 
   const { data: rpcData, error: rpcError } = await supabase.rpc('create_quick_order_atomic', {
@@ -2818,8 +2951,47 @@ export async function createQuickOrder(
   if (rpcData?.order_id) {
     orderId = rpcData.order_id;
     orderNumber = rpcData.order_number;
-    publicTrackingToken = rpcData.public_tracking_token || publicTrackingToken;
+    const rpcToken = typeof rpcData.public_tracking_token === 'string' ? rpcData.public_tracking_token : '';
     isIdempotent = Boolean(rpcData.idempotent);
+
+    if (isIdempotent && rpcToken) {
+      publicTrackingToken = rpcToken;
+    } else {
+      // Padroniza token curto também nos pedidos rápidos criados via RPC
+      try {
+        const ordersTable = supabase.from('orders') as any;
+        if (typeof ordersTable?.update === 'function') {
+          const { error: updateTokenErr } = await ordersTable
+            .update({ public_tracking_token: publicTrackingToken })
+            .eq('id', orderId)
+            .eq('tenant_id', tenantId);
+          if (updateTokenErr && rpcToken) {
+            publicTrackingToken = rpcToken;
+          }
+        } else if (rpcToken && rpcToken.length <= 16) {
+          publicTrackingToken = rpcToken;
+        }
+      } catch {
+        if (rpcToken && rpcToken.length <= 16) {
+          publicTrackingToken = rpcToken;
+        }
+      }
+    }
+
+    if (customOrderNumber && !isIdempotent) {
+      const { error: updateOrderNumErr } = await supabase
+        .from('orders')
+        .update({ order_number: customOrderNumber })
+        .eq('id', orderId)
+        .eq('tenant_id', tenantId);
+
+      if (updateOrderNumErr) {
+        throw new Error(
+          `Não foi possível definir o número do pedido "${customOrderNumber}": ${updateOrderNumErr.message}`
+        );
+      }
+      orderNumber = customOrderNumber;
+    }
 
     // Integração Estoque (Etapa 3D): Reserva no pedido rápido confirmado
     if (initialOrderStatus === 'confirmed' && !isIdempotent) {

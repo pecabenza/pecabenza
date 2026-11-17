@@ -6,7 +6,13 @@ import { ShoppingBag, Plus, Minus, Check, Clock } from 'lucide-react';
 import { useCart, formatBrl } from '@/modules/cart/CartContext';
 import { Button } from '@/components/ui/Button';
 import { isCommerceEnabled } from '@/lib/tenancy/site-mode';
-import type { ProductVariant, SiteMode } from '@/types/database.types';
+import { hasPromotionalPrice, getDiscountPercentage } from '@/modules/catalog/pricing';
+import { validateAndResolveModifiers } from '@/modules/catalog/modifiers';
+import type {
+  ProductVariant,
+  ProductModifierGroup,
+  SiteMode,
+} from '@/types/database.types';
 
 interface ProductCommerceActionProps {
   productId: string;
@@ -14,6 +20,7 @@ interface ProductCommerceActionProps {
   productSlug: string;
   coverImageUrl?: string | null;
   variants: ProductVariant[];
+  modifierGroups?: ProductModifierGroup[];
   siteMode?: SiteMode;
 }
 
@@ -23,6 +30,7 @@ export function ProductCommerceAction({
   productSlug,
   coverImageUrl,
   variants,
+  modifierGroups = [],
   siteMode = 'commerce',
 }: ProductCommerceActionProps) {
   const { addItem } = useCart();
@@ -30,6 +38,8 @@ export function ProductCommerceAction({
   // Seleciona a primeira variante disponível por padrão
   const defaultVariant = variants.find((v) => v.is_available) || variants[0];
   const [selectedVariantId, setSelectedVariantId] = useState<string>(defaultVariant?.id || '');
+  const [selectedModifierIds, setSelectedModifierIds] = useState<string[]>([]);
+  const [modifierError, setModifierError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState<number>(1);
   const [isAdded, setIsAdded] = useState(false);
 
@@ -68,25 +78,72 @@ export function ProductCommerceAction({
     );
   }
 
+  const modifierValidation = validateAndResolveModifiers(
+    modifierGroups,
+    selectedModifierIds
+  );
+
+  const toggleModifierOption = (group: ProductModifierGroup, optionId: string) => {
+    setModifierError(null);
+    const groupOptionIds = new Set((group.options || []).map((o) => o.id));
+    const maxSel = Math.max(1, group.max_selections || 1);
+
+    setSelectedModifierIds((prev) => {
+      const isAlreadySelected = prev.includes(optionId);
+      if (maxSel === 1) {
+        const withoutGroup = prev.filter((id) => !groupOptionIds.has(id));
+        if (isAlreadySelected && !group.is_required && (group.min_selections || 0) === 0) {
+          return withoutGroup;
+        }
+        return [...withoutGroup, optionId];
+      }
+
+      if (isAlreadySelected) {
+        return prev.filter((id) => id !== optionId);
+      }
+
+      const currentGroupCount = prev.filter((id) => groupOptionIds.has(id)).length;
+      if (currentGroupCount >= maxSel) {
+        return prev;
+      }
+      return [...prev, optionId];
+    });
+  };
+
   const handleAddToCart = () => {
+    if (!modifierValidation.valid) {
+      setModifierError(modifierValidation.error || 'Selecione as opções obrigatórias.');
+      return;
+    }
+
+    const unitPriceWithModifiers =
+      selectedVariant.price_in_cents + modifierValidation.extraPriceCents;
+
     addItem({
       productId,
       productName,
       productSlug,
       variantId: selectedVariant.id,
       variantName: selectedVariant.name,
-      unitPriceInCents: selectedVariant.price_in_cents,
+      unitPriceInCents: unitPriceWithModifiers,
       quantity,
       coverImageUrl,
       unitValue: selectedVariant.unit_value,
       unitType: selectedVariant.unit_type,
+      selectedModifiers: modifierValidation.selectedSnapshots,
     });
 
     setIsAdded(true);
     setTimeout(() => setIsAdded(false), 2000);
   };
 
-  const totalPriceInCents = selectedVariant.price_in_cents * quantity;
+  const unitPriceTotal =
+    selectedVariant.price_in_cents +
+    validateAndResolveModifiers(
+      modifierGroups.map((g) => ({ ...g, is_required: false, min_selections: 0 })),
+      selectedModifierIds
+    ).extraPriceCents;
+  const totalPriceInCents = unitPriceTotal * quantity;
 
   return (
     <div className="p-6 rounded-2xl bg-tenant-surface border border-tenant-border/80 shadow-sm space-y-6">
@@ -98,6 +155,8 @@ export function ProductCommerceAction({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {variants.map((v) => {
             const isSelected = v.id === selectedVariant.id;
+            const isPromo = hasPromotionalPrice(v);
+            const discountPct = getDiscountPercentage(v);
             return (
               <button
                 key={v.id}
@@ -110,29 +169,130 @@ export function ProductCommerceAction({
                     : 'border-tenant-border hover:border-tenant-border/80 bg-tenant-background'
                 } ${!v.is_available ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
               >
-                <div className="flex items-center justify-between w-full">
+                <div className="flex items-center justify-between w-full gap-2">
                   <span className="font-heading font-bold text-sm text-tenant-text">
                     {v.name}
                   </span>
-                  {isSelected && (
-                    <div className="w-4 h-4 rounded-full bg-tenant-primary text-white flex items-center justify-center">
-                      <Check className="w-2.5 h-2.5 stroke-[3]" />
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {discountPct && (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                        -{discountPct}%
+                      </span>
+                    )}
+                    {isSelected && (
+                      <div className="w-4 h-4 rounded-full bg-tenant-primary text-white flex items-center justify-center">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center justify-between w-full mt-1">
+                <div className="flex items-end justify-between w-full mt-1 gap-2">
                   <span className="text-[11px] text-tenant-muted">
                     {v.unit_value} {v.unit_type}
                   </span>
-                  <span className="font-heading font-bold text-sm text-tenant-primary">
-                    {formatBrl(v.price_in_cents)}
-                  </span>
+                  <div className="text-right leading-tight">
+                    {isPromo && v.compare_at_price_cents && (
+                      <span className="block text-[11px] text-tenant-muted line-through">
+                        De {formatBrl(v.compare_at_price_cents)}
+                      </span>
+                    )}
+                    <span className="font-heading font-bold text-sm text-tenant-primary">
+                      {isPromo ? `Por ${formatBrl(v.price_in_cents)}` : formatBrl(v.price_in_cents)}
+                    </span>
+                  </div>
                 </div>
               </button>
             );
           })}
         </div>
       </div>
+
+      {/* 1b. Grupos de Complementos / Adicionais (Estilo iFood) */}
+      {modifierGroups.length > 0 && (
+        <div className="space-y-4 pt-2 border-t border-tenant-border/50">
+          {modifierGroups.map((group) => {
+            const options = (group.options || []).filter((o) => o.is_available !== false);
+            if (options.length === 0) return null;
+            const maxSel = Math.max(1, group.max_selections || 1);
+            const minSel = group.is_required ? Math.max(1, group.min_selections || 0) : (group.min_selections || 0);
+            const selectedCount = options.filter((o) => selectedModifierIds.includes(o.id)).length;
+
+            return (
+              <div key={group.id} className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-tenant-text block">
+                      {group.name}
+                    </span>
+                    <span className="text-[11px] text-tenant-muted">
+                      {maxSel === 1
+                        ? minSel > 0
+                          ? 'Escolha 1 opção'
+                          : 'Escolha até 1 opção'
+                        : minSel > 0
+                        ? `Escolha de ${minSel} até ${maxSel} opções (${selectedCount}/${maxSel})`
+                        : `Escolha até ${maxSel} opções (${selectedCount}/${maxSel})`}
+                    </span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                      group.is_required || minSel > 0
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-stone-100 text-stone-600'
+                    }`}
+                  >
+                    {group.is_required || minSel > 0 ? 'Obrigatório' : 'Opcional'}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {options.map((opt) => {
+                    const checked = selectedModifierIds.includes(opt.id);
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => toggleModifierOption(group, opt.id)}
+                        className={`w-full px-3.5 py-2.5 rounded-xl border text-left flex items-center justify-between gap-3 transition-all ${
+                          checked
+                            ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                            : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`w-4 h-4 shrink-0 border flex items-center justify-center ${
+                              maxSel === 1 ? 'rounded-full' : 'rounded'
+                            } ${
+                              checked
+                                ? 'bg-tenant-primary border-tenant-primary text-white'
+                                : 'border-stone-300 bg-white'
+                            }`}
+                          >
+                            {checked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                          </span>
+                          <span className="text-xs font-semibold text-tenant-text truncate">
+                            {opt.name}
+                          </span>
+                        </div>
+                        <span className="text-xs font-bold text-tenant-primary shrink-0">
+                          {opt.price_in_cents > 0 ? `+ ${formatBrl(opt.price_in_cents)}` : 'Incluso'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {modifierError && (
+            <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+              {modifierError}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 2. Quantidade e Totalizador */}
       <div className="pt-4 border-t border-tenant-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

@@ -20,6 +20,9 @@ const BrandingUpdateSchema = z.object({
   color_background: z.string().regex(hexColorRegex, 'Cor de fundo inválida'),
   color_surface: z.string().regex(hexColorRegex, 'Cor de superfície inválida'),
   color_text: z.string().regex(hexColorRegex, 'Cor de texto inválida'),
+  color_admin_sidebar: z.string().regex(hexColorRegex, 'Cor do menu lateral inválida').optional(),
+  color_button: z.string().regex(hexColorRegex, 'Cor dos botões inválida').optional(),
+  color_button_hover: z.string().regex(hexColorRegex, 'Cor de hover dos botões inválida').optional(),
   border_radius: z.string().max(20).default('0.75rem'),
   prelaunch_banner_text: z.string().max(255).optional(),
   prelaunch_cta_text: z.string().max(50).optional(),
@@ -64,25 +67,49 @@ export async function POST(request: NextRequest) {
     const adminClient = createAdminClient();
 
     // 1. Atualizar tenant_branding
-    const { data: updatedBranding, error: brandErr } = await adminClient
+    const baseUpdate = {
+      logo_url: validated.logo_url || null,
+      favicon_url: validated.favicon_url || null,
+      font_family_heading: validated.font_family_heading,
+      font_family_body: validated.font_family_body,
+      color_primary: validated.color_primary,
+      color_secondary: validated.color_secondary,
+      color_accent: validated.color_accent,
+      color_background: validated.color_background,
+      color_surface: validated.color_surface,
+      color_text: validated.color_text,
+      border_radius: validated.border_radius,
+      updated_at: new Date().toISOString(),
+    };
+
+    const extendedUpdate: Record<string, unknown> = { ...baseUpdate };
+    if (validated.color_admin_sidebar) {
+      extendedUpdate.color_admin_sidebar = validated.color_admin_sidebar;
+    }
+    if (validated.color_button) {
+      extendedUpdate.color_button = validated.color_button;
+    }
+    if (validated.color_button_hover) {
+      extendedUpdate.color_button_hover = validated.color_button_hover;
+    }
+
+    let { data: updatedBranding, error: brandErr } = await adminClient
       .from('tenant_branding')
-      .update({
-        logo_url: validated.logo_url || null,
-        favicon_url: validated.favicon_url || null,
-        font_family_heading: validated.font_family_heading,
-        font_family_body: validated.font_family_body,
-        color_primary: validated.color_primary,
-        color_secondary: validated.color_secondary,
-        color_accent: validated.color_accent,
-        color_background: validated.color_background,
-        color_surface: validated.color_surface,
-        color_text: validated.color_text,
-        border_radius: validated.border_radius,
-        updated_at: new Date().toISOString(),
-      })
+      .update(extendedUpdate)
       .eq('tenant_id', tenant.id)
       .select('*')
       .single();
+
+    if (brandErr && brandErr.code === '42703') {
+      const retry = await adminClient
+        .from('tenant_branding')
+        .update(baseUpdate)
+        .eq('tenant_id', tenant.id)
+        .select('*')
+        .single();
+      updatedBranding = retry.data;
+      brandErr = retry.error;
+    }
 
     if (brandErr) {
       return NextResponse.json(

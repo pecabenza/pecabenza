@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   ShoppingBag,
@@ -73,6 +73,7 @@ export default function AdminOrdersPage() {
   const [soundActive, setSoundActive] = useState(true);
   const [printOrder, setPrintOrder] = useState<OperationalOrder | null>(null);
   const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
+  const hasLoadedOnceRef = useRef(false);
 
   useEffect(() => {
     setSoundActive(isSoundEnabled());
@@ -117,8 +118,9 @@ export default function AdminOrdersPage() {
         if (statusFilter === 'all' && channelFilter === 'all') {
           checkAndNotifyNewOrders(
             nextOrders.map((o) => o.id),
-            isLoading
+            !hasLoadedOnceRef.current
           );
+          hasLoadedOnceRef.current = true;
         }
         setOrders(nextOrders);
       }
@@ -127,7 +129,7 @@ export default function AdminOrdersPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter, channelFilter, isLoading]);
+  }, [statusFilter, channelFilter]);
 
   useEffect(() => {
     fetchOrders();

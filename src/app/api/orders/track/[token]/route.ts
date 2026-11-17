@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/security/rate-limit';
+import { resolveTenantByHost } from '@/lib/tenancy/context';
 import { getPublicOrderTracking } from '@/modules/orders/orders.service';
+import { isValidPublicTrackingToken } from '@/modules/orders/tracking-token';
 import { logger } from '@/lib/observability/logger';
 
 export const dynamic = 'force-dynamic';
@@ -12,7 +14,7 @@ export async function GET(
   try {
     const { token } = await params;
 
-    if (!token || typeof token !== 'string' || token.length < 16) {
+    if (!isValidPublicTrackingToken(token)) {
       return NextResponse.json({ error: 'Token de acompanhamento inválido.' }, { status: 400 });
     }
 
@@ -31,7 +33,15 @@ export async function GET(
       );
     }
 
-    const trackingData = await getPublicOrderTracking(token);
+    const host = request.headers.get('x-tenant-host') || request.headers.get('host') || 'localhost:3000';
+    let tenantContext = null;
+    try {
+      tenantContext = await resolveTenantByHost(host);
+    } catch {
+      tenantContext = null;
+    }
+
+    const trackingData = await getPublicOrderTracking(token, tenantContext?.tenant.id);
 
     if (!trackingData) {
       logger.warn('Tentativa de consulta com token de rastreio inexistente', {
@@ -40,7 +50,18 @@ export async function GET(
       return NextResponse.json({ error: 'Pedido não localizado.' }, { status: 404 });
     }
 
-    return NextResponse.json(trackingData, { status: 200 });
+    const supportWhatsapp =
+      tenantContext?.settings.contact_whatsapp ||
+      tenantContext?.settings.contact_phone ||
+      null;
+
+    return NextResponse.json(
+      {
+        ...trackingData,
+        supportWhatsapp,
+      },
+      { status: 200 }
+    );
   } catch (error: any) {
     logger.error('Erro na consulta pública de status de pedido', {
       error: error.message,

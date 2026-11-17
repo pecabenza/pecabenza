@@ -6,6 +6,10 @@ import {
   PAYMENT_STATUS_LABELS,
 } from '@/modules/orders/order-status.machine';
 import { getPublicOrderTracking } from '@/modules/orders/orders.service';
+import {
+  generateShortTrackingToken,
+  isValidPublicTrackingToken,
+} from '@/modules/orders/tracking-token';
 
 describe('Etapa 2C — Máquina de Estados e Acompanhamento Seguro de Pedidos', () => {
   describe('1. Validações da Máquina de Estados (State Machine)', () => {
@@ -88,7 +92,19 @@ describe('Etapa 2C — Máquina de Estados e Acompanhamento Seguro de Pedidos', 
     it('deve rejeitar tokens vazios, curtos ou inválidos', async () => {
       expect(await getPublicOrderTracking('')).toBeNull();
       expect(await getPublicOrderTracking('12345')).toBeNull();
+      expect(await getPublicOrderTracking('token com espaco')).toBeNull();
       expect(await getPublicOrderTracking(null as any)).toBeNull();
+    });
+
+    it('deve gerar token curto de 10 caracteres sem caracteres ambíguos e aceitar tokens curtos e legados', () => {
+      const shortToken = generateShortTrackingToken();
+      expect(shortToken).toHaveLength(10);
+      expect(isValidPublicTrackingToken(shortToken)).toBe(true);
+      expect(/[0O1IL]/.test(shortToken)).toBe(false);
+
+      const legacyHexToken = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6';
+      expect(isValidPublicTrackingToken(legacyHexToken)).toBe(true);
+      expect(isValidPublicTrackingToken('curto')).toBe(false);
     });
   });
 });

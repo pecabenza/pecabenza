@@ -14,10 +14,21 @@ import {
   Save,
   RefreshCw,
   Loader2,
+  Trash2,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { useSystemDialog } from '@/components/ui/SystemDialogProvider';
 import { ImageUploadField } from '@/components/admin/ImageUploadField';
+import { SOBRE_SECTION_LABELS } from '@/modules/cms/sobre-defaults';
+
+type PageSlugOption = 'home' | 'sobre' | 'contato';
+
+const PAGE_OPTIONS: { slug: PageSlugOption; label: string; route: string }[] = [
+  { slug: 'home', label: 'Página Inicial', route: '/' },
+  { slug: 'sobre', label: 'Nossa Proposta', route: '/sobre' },
+  { slug: 'contato', label: 'Contato', route: '/contato' },
+];
 
 interface SectionItem {
   id: string;
@@ -31,6 +42,8 @@ interface SectionItem {
 }
 
 export default function AdminSitePage() {
+  const { showAlert } = useSystemDialog();
+  const [activePage, setActivePage] = useState<PageSlugOption>('home');
   const [sections, setSections] = useState<SectionItem[]>([]);
   const [pageId, setPageId] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -44,11 +57,11 @@ export default function AdminSitePage() {
     setTimeout(() => setSavedMessage(null), 3500);
   };
 
-  const loadSections = async () => {
+  const loadSections = async (pageSlug: PageSlugOption = activePage) => {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const res = await fetch('/api/admin/sections?page=home');
+      const res = await fetch(`/api/admin/sections?page=${pageSlug}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setSections(data.sections || []);
@@ -64,8 +77,8 @@ export default function AdminSitePage() {
   };
 
   useEffect(() => {
-    loadSections();
-  }, []);
+    loadSections(activePage);
+  }, [activePage]);
 
   const handleToggleActive = async (id: string, current: boolean) => {
     try {
@@ -78,10 +91,18 @@ export default function AdminSitePage() {
         setSections(sections.map((s) => (s.id === id ? { ...s, is_active: !current } : s)));
         showSaved(`Seção ${!current ? 'ativada' : 'desativada'} com sucesso.`);
       } else {
-        alert('Falha ao alterar visibilidade da seção.');
+        await showAlert({
+          title: 'Erro ao atualizar seção',
+          message: 'Falha ao alterar visibilidade da seção.',
+          variant: 'error',
+        });
       }
     } catch {
-      alert('Erro ao atualizar seção.');
+      await showAlert({
+        title: 'Erro ao atualizar seção',
+        message: 'Erro ao atualizar seção.',
+        variant: 'error',
+      });
     }
   };
 
@@ -113,7 +134,11 @@ export default function AdminSitePage() {
       ]);
       showSaved('Ordem das seções atualizada.');
     } catch {
-      alert('Erro ao persistir nova ordenação.');
+      await showAlert({
+        title: 'Erro de ordenação',
+        message: 'Erro ao persistir nova ordenação.',
+        variant: 'error',
+      });
       loadSections();
     }
   };
@@ -163,10 +188,10 @@ export default function AdminSitePage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl font-bold text-stone-900">
-            Seções da Página Inicial
+            Páginas & Seções do Site (CMS)
           </h1>
           <p className="text-sm text-stone-500">
-            Gerencie o conteúdo, visibilidade e a ordem dos blocos institucionais da Home.
+            Edite textos, substitua ou remova imagens, oculte e reordene seções das páginas principais.
           </p>
         </div>
 
@@ -174,7 +199,7 @@ export default function AdminSitePage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={loadSections}
+            onClick={() => loadSections(activePage)}
             disabled={loading}
             className="gap-2"
           >
@@ -189,6 +214,30 @@ export default function AdminSitePage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Seletor de Página Principal */}
+      <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-stone-200">
+        {PAGE_OPTIONS.map((opt) => {
+          const isCurrent = activePage === opt.slug;
+          return (
+            <button
+              key={opt.slug}
+              type="button"
+              onClick={() => setActivePage(opt.slug)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
+                isCurrent
+                  ? 'bg-stone-900 text-white border-stone-900 shadow-xs'
+                  : 'bg-white text-stone-700 border-stone-200 hover:border-stone-400'
+              }`}
+            >
+              {opt.label}{' '}
+              <span className={isCurrent ? 'text-stone-300' : 'text-stone-400'}>
+                ({opt.route})
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {errorMessage && (
@@ -227,7 +276,7 @@ export default function AdminSitePage() {
                         {section.content?.title || section.section_type}
                       </h3>
                       <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
-                        {section.section_type}
+                        {SOBRE_SECTION_LABELS[section.section_type] || section.section_type}
                       </span>
                       {!section.is_active && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
@@ -307,20 +356,102 @@ export default function AdminSitePage() {
               {/* Fotografia da Seção se suportada */}
               {(editingSection.section_type === 'HeroEditorial' ||
                 editingSection.section_type === 'BrandStorySection' ||
-                editingSection.section_type === 'ImageTextSection') && (
-                <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/50">
+                editingSection.section_type === 'ImageTextSection' ||
+                editingSection.section_type === 'SobreHero' ||
+                editingSection.section_type === 'SobreEssencia') && (
+                <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/50 space-y-3">
                   <ImageUploadField
                     label="Fotografia da Seção"
                     value={editingSection.content.image_url || ''}
                     onChange={(url) =>
                       setEditingSection({
                         ...editingSection,
-                        content: { ...editingSection.content, image_url: url },
+                        content: {
+                          ...editingSection.content,
+                          image_url: url,
+                          image_hidden: false,
+                        },
                       })
                     }
                     defaultImageUrl={editingSection.defaultMockupUrl}
-                    category={editingSection.section_type === 'HeroEditorial' ? 'hero' : 'general'}
+                    category={
+                      editingSection.section_type === 'HeroEditorial' ||
+                      editingSection.section_type === 'SobreHero'
+                        ? 'hero'
+                        : 'general'
+                    }
                     aspectRatio="wide"
+                  />
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-200/50">
+                    <label className="flex items-center gap-2 text-xs font-medium text-stone-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(editingSection.content.image_hidden)}
+                        onChange={(e) =>
+                          setEditingSection({
+                            ...editingSection,
+                            content: {
+                              ...editingSection.content,
+                              image_hidden: e.target.checked,
+                            },
+                          })
+                        }
+                        className="rounded border-stone-300"
+                      />
+                      <span>Ocultar fotografia nesta seção</span>
+                    </label>
+
+                    {editingSection.content.image_url && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingSection({
+                            ...editingSection,
+                            content: { ...editingSection.content, image_url: '' },
+                          })
+                        }
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:underline"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Apagar imagem personalizada</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Selo / Eyebrow / Badge */}
+              {editingSection.content.badge !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Selo Superior (Badge)</label>
+                  <input
+                    type="text"
+                    value={editingSection.content.badge || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, badge: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
+                  />
+                </div>
+              )}
+
+              {editingSection.content.eyebrow !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Subtítulo Superior (Eyebrow)</label>
+                  <input
+                    type="text"
+                    value={editingSection.content.eyebrow || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, eyebrow: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
                   />
                 </div>
               )}
@@ -394,6 +525,139 @@ export default function AdminSitePage() {
                       })
                     }
                     className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800 resize-none"
+                  />
+                </div>
+              )}
+
+              {/* Campos extras das seções de /sobre */}
+              {editingSection.content.location_note !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Nota de Localização</label>
+                  <input
+                    type="text"
+                    value={editingSection.content.location_note || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, location_note: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
+                  />
+                </div>
+              )}
+
+              {editingSection.content.frozen_title !== undefined && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-stone-200">
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-stone-700">Modalidade 1 — Título</label>
+                    <input
+                      type="text"
+                      value={editingSection.content.frozen_title || ''}
+                      onChange={(e) =>
+                        setEditingSection({
+                          ...editingSection,
+                          content: { ...editingSection.content, frozen_title: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm"
+                    />
+                    <label className="text-xs font-bold uppercase text-stone-700 block">Modalidade 1 — Texto</label>
+                    <textarea
+                      rows={3}
+                      value={editingSection.content.frozen_description || ''}
+                      onChange={(e) =>
+                        setEditingSection({
+                          ...editingSection,
+                          content: { ...editingSection.content, frozen_description: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm resize-none"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-stone-700">Modalidade 2 — Título</label>
+                    <input
+                      type="text"
+                      value={editingSection.content.ready_title || ''}
+                      onChange={(e) =>
+                        setEditingSection({
+                          ...editingSection,
+                          content: { ...editingSection.content, ready_title: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm"
+                    />
+                    <label className="text-xs font-bold uppercase text-stone-700 block">Modalidade 2 — Texto</label>
+                    <textarea
+                      rows={3}
+                      value={editingSection.content.ready_description || ''}
+                      onChange={(e) =>
+                        setEditingSection({
+                          ...editingSection,
+                          content: { ...editingSection.content, ready_description: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm resize-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {Array.isArray(editingSection.content.items) &&
+                editingSection.section_type === 'SobrePilares' && (
+                  <div className="space-y-3 pt-2 border-t border-stone-200">
+                    <label className="text-xs font-bold uppercase text-stone-700 block">
+                      Pilares Exibidos (Cards)
+                    </label>
+                    {editingSection.content.items.map((item: any, idx: number) => (
+                      <div key={idx} className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2">
+                        <input
+                          type="text"
+                          value={item.title || ''}
+                          onChange={(e) => {
+                            const nextItems = [...editingSection.content.items];
+                            nextItems[idx] = { ...nextItems[idx], title: e.target.value };
+                            setEditingSection({
+                              ...editingSection,
+                              content: { ...editingSection.content, items: nextItems },
+                            });
+                          }}
+                          className="w-full px-3 py-1.5 rounded border border-stone-300 text-xs font-bold bg-white"
+                          placeholder="Título do pilar"
+                        />
+                        <textarea
+                          rows={2}
+                          value={item.description || ''}
+                          onChange={(e) => {
+                            const nextItems = [...editingSection.content.items];
+                            nextItems[idx] = { ...nextItems[idx], description: e.target.value };
+                            setEditingSection({
+                              ...editingSection,
+                              content: { ...editingSection.content, items: nextItems },
+                            });
+                          }}
+                          className="w-full px-3 py-1.5 rounded border border-stone-300 text-xs bg-white resize-none"
+                          placeholder="Descrição do pilar"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              {editingSection.content.cta_label !== undefined && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-stone-700">Texto do Link / Botão</label>
+                  <input
+                    type="text"
+                    value={editingSection.content.cta_label || ''}
+                    onChange={(e) =>
+                      setEditingSection({
+                        ...editingSection,
+                        content: { ...editingSection.content, cta_label: e.target.value },
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
                   />
                 </div>
               )}

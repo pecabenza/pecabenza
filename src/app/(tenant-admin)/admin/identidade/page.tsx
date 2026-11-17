@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Palette, CheckCircle2, Save, Image as ImageIcon, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ImageUploadField } from '@/components/admin/ImageUploadField';
 
 export default function AdminIdentidadePage() {
+  const router = useRouter();
   const [logoUrl, setLogoUrl] = useState('');
   const [faviconUrl, setFaviconUrl] = useState('');
 
@@ -17,6 +19,9 @@ export default function AdminIdentidadePage() {
     background: '#FDFBF7',
     surface: '#FFFFFF',
     text: '#1C1917',
+    adminSidebar: '#1C1917',
+    button: '#A84B2C',
+    buttonHover: '#8E3D22',
     borderRadius: '0.75rem',
   });
 
@@ -44,6 +49,9 @@ export default function AdminIdentidadePage() {
             background: data.branding.color_background || '#FDFBF7',
             surface: data.branding.color_surface || '#FFFFFF',
             text: data.branding.color_text || '#1C1917',
+            adminSidebar: data.branding.color_admin_sidebar || '#1C1917',
+            button: data.branding.color_button || data.branding.color_primary || '#A84B2C',
+            buttonHover: data.branding.color_button_hover || '#8E3D22',
             borderRadius: data.branding.border_radius || '0.75rem',
           });
         }
@@ -83,6 +91,9 @@ export default function AdminIdentidadePage() {
           color_background: colors.background,
           color_surface: colors.surface,
           color_text: colors.text,
+          color_admin_sidebar: colors.adminSidebar,
+          color_button: colors.button,
+          color_button_hover: colors.buttonHover,
           border_radius: colors.borderRadius,
           prelaunch_banner_text: bannerText,
           prelaunch_cta_text: ctaText,
@@ -92,6 +103,7 @@ export default function AdminIdentidadePage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setSaved(true);
+        router.refresh();
         setTimeout(() => setSaved(false), 3500);
       } else {
         const details = data.details ? data.details.map((d: any) => `${d.field}: ${d.message}`).join(', ') : '';
@@ -324,6 +336,69 @@ export default function AdminIdentidadePage() {
                     type="text"
                     value={colors.text}
                     onChange={(e) => setColors({ ...colors, text: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-800"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-stone-700 flex items-center justify-between">
+                  <span>Cor do Menu Lateral (Admin)</span>
+                  <span className="font-mono text-[11px] text-stone-500">{colors.adminSidebar}</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={colors.adminSidebar}
+                    onChange={(e) => setColors({ ...colors, adminSidebar: e.target.value })}
+                    className="w-10 h-10 rounded-lg cursor-pointer border border-stone-300 p-0.5 bg-white"
+                  />
+                  <input
+                    type="text"
+                    value={colors.adminSidebar}
+                    onChange={(e) => setColors({ ...colors, adminSidebar: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-800"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-stone-700 flex items-center justify-between">
+                  <span>Cor dos Botões</span>
+                  <span className="font-mono text-[11px] text-stone-500">{colors.button}</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={colors.button}
+                    onChange={(e) => setColors({ ...colors, button: e.target.value })}
+                    className="w-10 h-10 rounded-lg cursor-pointer border border-stone-300 p-0.5 bg-white"
+                  />
+                  <input
+                    type="text"
+                    value={colors.button}
+                    onChange={(e) => setColors({ ...colors, button: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-800"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-stone-700 flex items-center justify-between">
+                  <span>Cor do Hover dos Botões</span>
+                  <span className="font-mono text-[11px] text-stone-500">{colors.buttonHover}</span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={colors.buttonHover}
+                    onChange={(e) => setColors({ ...colors, buttonHover: e.target.value })}
+                    className="w-10 h-10 rounded-lg cursor-pointer border border-stone-300 p-0.5 bg-white"
+                  />
+                  <input
+                    type="text"
+                    value={colors.buttonHover}
+                    onChange={(e) => setColors({ ...colors, buttonHover: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-800"
                   />
                 </div>

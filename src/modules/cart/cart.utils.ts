@@ -1,4 +1,9 @@
 import type { CartItem } from './cart.types';
+import { buildCartItemKey } from '@/modules/catalog/modifiers';
+
+export function resolveCartItemKey(item: Pick<CartItem, 'itemKey' | 'variantId' | 'selectedModifiers'>): string {
+  return item.itemKey || buildCartItemKey(item.variantId, item.selectedModifiers);
+}
 
 /**
  * Formata um valor monetário em centavos para o formato de moeda brasileiro (BRL).
@@ -36,15 +41,17 @@ export function calculateCartSubtotal(items: CartItem[]): number {
  * Adiciona um item ao carrinho consolidando porções iguais (mesmo variantId).
  */
 export function consolidateCartItem(currentItems: CartItem[], newItem: CartItem): CartItem[] {
-  const existingIndex = currentItems.findIndex((i) => i.variantId === newItem.variantId);
+  const newKey = resolveCartItemKey(newItem);
+  const normalizedNew: CartItem = { ...newItem, itemKey: newKey };
+  const existingIndex = currentItems.findIndex((i) => resolveCartItemKey(i) === newKey);
   if (existingIndex > -1) {
     return currentItems.map((item, idx) =>
       idx === existingIndex
-        ? { ...item, quantity: item.quantity + newItem.quantity }
+        ? { ...item, quantity: item.quantity + normalizedNew.quantity }
         : item
     );
   }
-  return [...currentItems, newItem];
+  return [...currentItems, normalizedNew];
 }
 
 /**
@@ -52,12 +59,16 @@ export function consolidateCartItem(currentItems: CartItem[], newItem: CartItem)
  */
 export function updateCartItemQuantity(
   currentItems: CartItem[],
-  variantId: string,
+  itemKeyOrVariantId: string,
   quantity: number
 ): CartItem[] {
+  const matches = (i: CartItem) =>
+    resolveCartItemKey(i) === itemKeyOrVariantId || i.variantId === itemKeyOrVariantId;
   if (quantity <= 0) {
-    return currentItems.filter((i) => i.variantId !== variantId);
+    return currentItems.filter((i) => !matches(i));
   }
-  return currentItems.map((i) => (i.variantId === variantId ? { ...i, quantity } : i));
+  return currentItems.map((item) =>
+    matches(item) ? { ...item, quantity } : item
+  );
 }
 

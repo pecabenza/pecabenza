@@ -1,5 +1,9 @@
 import { createAdminClient } from '@/lib/supabase/admin';
-import type { Product, ProductCategory } from '@/types/database.types';
+import type {
+  Product,
+  ProductCategory,
+  ProductModifierGroup,
+} from '@/types/database.types';
 import { hydrateProductsWithCoverUrls } from './media-helper';
 
 // Dados de fallback para desenvolvimento local caso o banco remoto não esteja conectado
@@ -174,6 +178,109 @@ function sanitizeStorefrontProduct(product: Product, tenantId: string): Product 
   };
 }
 
+async function hydrateProductModifiersAndSuggestions(
+  supabase: ReturnType<typeof createAdminClient>,
+  tenantId: string,
+  products: Product[]
+): Promise<Product[]> {
+  if (products.length === 0) return products;
+  const productIds = products.map((p) => p.id);
+
+  // Carregamento resiliente: se migration 00017 ainda não tiver sido aplicada, segue sem quebrar o catálogo
+  let groupsByProduct = new Map<string, ProductModifierGroup[]>();
+  try {
+    const { data: groupsData } = await supabase
+      .from('product_modifier_groups')
+      .select('*, options:product_modifier_options(*)')
+      .eq('tenant_id', tenantId)
+      .in('product_id', productIds)
+      .order('display_order', { ascending: true });
+
+    if (groupsData) {
+      for (const rawGroup of groupsData as ProductModifierGroup[]) {
+        const availableOptions = (rawGroup.options || [])
+          .filter((o) => o.is_available !== false)
+          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
+        const normalized: ProductModifierGroup = {
+          ...rawGroup,
+          options: availableOptions,
+        };
+        const current = groupsByProduct.get(rawGroup.product_id) || [];
+        current.push(normalized);
+        groupsByProduct.set(rawGroup.product_id, current);
+      }
+    }
+  } catch {
+    // Tabela opcional ainda não migrada
+  }
+
+  let suggestionIdsByProduct = new Map<string, string[]>();
+  try {
+    const { data: suggestionsData } = await supabase
+      .from('product_suggestions')
+      .select('product_id, suggested_product_id, display_order')
+      .eq('tenant_id', tenantId)
+      .in('product_id', productIds)
+      .order('display_order', { ascending: true });
+
+    if (suggestionsData) {
+      for (const row of suggestionsData as Array<{
+        product_id: string;
+        suggested_product_id: string;
+      }>) {
+        const list = suggestionIdsByProduct.get(row.product_id) || [];
+        list.push(row.suggested_product_id);
+        suggestionIdsByProduct.set(row.product_id, list);
+      }
+    }
+  } catch {
+    // Tabela opcional ainda não migrada
+  }
+
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  return products.map((p) => {
+    const suggestedIds = suggestionIdsByProduct.get(p.id) || [];
+    const resolvedSuggestions = suggestedIds
+      .map((sid) => productById.get(sid))
+      .filter((item): item is Product => Boolean(item));
+    return {
+      ...p,
+      modifier_groups: groupsByProduct.get(p.id) || [],
+      suggested_product_ids: suggestedIds,
+      suggestions: resolvedSuggestions,
+    };
+  });
+}
+
+export async function getTenantCategories(tenantId: string): Promise<ProductCategory[]> {
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from('product_categories')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      if (tenantId === '00000000-0000-0000-0000-000000000001') {
+        const unique = new Map<string, ProductCategory>();
+        for (const p of MOCK_PRODUCTS) {
+          if (p.category) unique.set(p.category.id, p.category);
+        }
+        return Array.from(unique.values());
+      }
+      return [];
+    }
+
+    return data as ProductCategory[];
+  } catch {
+    return [];
+  }
+}
+
 export async function getTenantProducts(tenantId: string): Promise<Product[]> {
   try {
     const supabase = createAdminClient();
@@ -192,7 +299,8 @@ export async function getTenantProducts(tenantId: string): Promise<Product[]> {
     }
 
     const hydrated = await hydrateProductsWithCoverUrls(supabase, tenantId, data as Product[]);
-    return hydrated.map((p) => sanitizeStorefrontProduct(p, tenantId));
+    const sanitized = hydrated.map((p) => sanitizeStorefrontProduct(p, tenantId));
+    return await hydrateProductModifiersAndSuggestions(supabase, tenantId, sanitized);
   } catch {
     if (tenantId === '00000000-0000-0000-0000-000000000001') {
       return MOCK_PRODUCTS;
@@ -221,7 +329,35 @@ export async function getTenantProductBySlug(tenantId: string, slug: string): Pr
     }
 
     const [hydrated] = await hydrateProductsWithCoverUrls(supabase, tenantId, [data as Product]);
-    return hydrated ? sanitizeStorefrontProduct(hydrated, tenantId) : null;
+    if (!hydrated) return null;
+    const sanitized = sanitizeStorefrontProduct(hydrated, tenantId);
+    const [enriched] = await hydrateProductModifiersAndSuggestions(supabase, tenantId, [sanitized]);
+
+    // Se houver sugestões que não estão no array [sanitized], buscar esses produtos ativos
+    if (enriched.suggested_product_ids && enriched.suggested_product_ids.length > 0) {
+      const { data: suggestedRows } = await supabase
+        .from('products')
+        .select('*, variants:product_variants(*), category:product_categories(*)')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'active')
+        .in('id', enriched.suggested_product_ids);
+
+      if (suggestedRows && suggestedRows.length > 0) {
+        const hydratedSuggested = await hydrateProductsWithCoverUrls(
+          supabase,
+          tenantId,
+          suggestedRows as Product[]
+        );
+        const byId = new Map(
+          hydratedSuggested.map((s) => [s.id, sanitizeStorefrontProduct(s, tenantId)])
+        );
+        enriched.suggestions = enriched.suggested_product_ids
+          .map((sid) => byId.get(sid))
+          .filter((item): item is Product => Boolean(item));
+      }
+    }
+
+    return enriched;
   } catch {
     if (tenantId === '00000000-0000-0000-0000-000000000001') {
       const found = MOCK_PRODUCTS.find((p) => p.slug === slug);

@@ -12,8 +12,8 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-tenant-host', host);
 
-  // 2. Proteção contra Brute Force em /admin/login via POST
-  if (pathname === '/admin/login' && request.method === 'POST') {
+  // 2. Proteção contra Brute Force em /login (e legado /admin/login) via POST
+  if ((pathname === '/login' || pathname === '/admin/login') && request.method === 'POST') {
     const rateLimit = await checkRateLimit(clientIp, {
       limit: 5,
       windowSeconds: 60,
@@ -79,12 +79,12 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // 5. Proteger rotas /admin (exceto /admin/login)
+  // 5. Proteger rotas /admin (exceto /login e legado /admin/login)
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-      const loginUrl = new URL('/admin/login', request.url);
+      const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(loginUrl);
     }

@@ -6,6 +6,7 @@ export const CartItemInputSchema = z.object({
   variantId: z.string().min(1, 'ID da porção/variante é obrigatório'),
   quantity: z.number().int().positive('Quantidade deve ser pelo menos 1').max(99, 'Quantidade máxima de 99 unidades por item'),
   clientPriceInCents: z.number().int().nonnegative().optional(),
+  selectedModifierOptionIds: z.array(z.string()).optional(),
 });
 
 export type CartItemInput = z.infer<typeof CartItemInputSchema>;
@@ -126,6 +127,27 @@ export const QuickOrderCustomerSchema = z.object({
     .or(z.literal('')),
 });
 
+// Endereço para Pedido Rápido (CEP opcional no atendimento WhatsApp/Telefone, mas validado se informado; demais campos obrigatórios)
+export const QuickOrderAddressSchema = z.object({
+  zipCode: z
+    .string()
+    .trim()
+    .refine((val) => val === '' || /^[0-9]{5}-?[0-9]{3}$/.test(val), {
+      message: 'CEP deve ter 8 dígitos (ex: 44000-000) ou ficar em branco',
+    })
+    .optional()
+    .default(''),
+  street: z.string().trim().min(2, 'Rua/Logradouro é obrigatório').max(200),
+  number: z.string().trim().min(1, 'Número do endereço (ou S/N) é obrigatório').max(30),
+  complement: z.string().trim().max(100).optional().or(z.literal('')),
+  neighborhood: z.string().trim().min(2, 'Bairro é obrigatório').max(100),
+  city: z.string().trim().min(2, 'Cidade é obrigatória').max(100),
+  state: z.string().trim().length(2, 'UF deve ter 2 letras').toUpperCase(),
+  reference: z.string().trim().max(300).optional().or(z.literal('')),
+});
+
+export type QuickOrderAddressInput = z.infer<typeof QuickOrderAddressSchema>;
+
 export const QuickOrderInputSchema = z
   .object({
     orderChannel: z.enum(['whatsapp', 'phone', 'counter', 'admin']).default('whatsapp'),
@@ -146,8 +168,13 @@ export const QuickOrderInputSchema = z
     cashChangeForCents: z.number().int().nonnegative().nullable().optional(),
     discountCents: z.number().int().nonnegative().default(0),
     deliveryFeeCentsOverride: z.number().int().nonnegative().nullable().optional(),
+    orderNumberOverride: z
+      .string()
+      .trim()
+      .max(30, 'Número do pedido não pode exceder 30 caracteres')
+      .optional(),
     confirmImmediately: z.boolean().default(true),
-    address: OrderAddressSchema.optional(),
+    address: QuickOrderAddressSchema.optional(),
     notes: z.string().trim().max(500, 'Observações não podem exceder 500 caracteres').optional(),
     idempotencyKey: z.string().trim().min(8).max(100).optional(),
   })

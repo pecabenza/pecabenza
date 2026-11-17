@@ -17,6 +17,8 @@ const config: Config = {
           background: "var(--color-background, #FDFBF7)",
           surface: "var(--color-surface, #FFFFFF)",
           text: "var(--color-text, #1C1917)",
+          button: "var(--color-button, var(--color-primary, #A84B2C))",
+          buttonHover: "var(--color-button-hover, #8E3D22)",
           muted: "var(--color-muted, #78716C)",
           border: "var(--color-border, #E7E5E4)",
         },

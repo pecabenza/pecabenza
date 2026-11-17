@@ -31,7 +31,7 @@ describe('Middleware de Segurança e Tenant Resolution', () => {
     expect(response.headers.get('x-tenant-host')).toBe('benza.sysfood.local:3000');
   });
 
-  it('deve redirecionar usuário não autenticado tentando acessar /admin para /admin/login', async () => {
+  it('deve redirecionar usuário não autenticado tentando acessar /admin para /login', async () => {
     mockUser = null;
     const request = new NextRequest('http://benza.sysfood.local:3000/admin', {
       headers: { host: 'benza.sysfood.local:3000' },
@@ -39,7 +39,7 @@ describe('Middleware de Segurança e Tenant Resolution', () => {
 
     const response = await middleware(request);
     expect(response.status).toBe(307); // NextResponse.redirect default é 307
-    expect(response.headers.get('location')).toContain('/admin/login?redirect=%2Fadmin');
+    expect(response.headers.get('location')).toContain('/login?redirect=%2Fadmin');
   });
 
   it('deve redirecionar usuário não autenticado em subrotas de /admin (ex: /admin/produtos, /admin/site)', async () => {
@@ -50,12 +50,12 @@ describe('Middleware de Segurança e Tenant Resolution', () => {
 
     const response = await middleware(request);
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toContain('/admin/login?redirect=%2Fadmin%2Fprodutos');
+    expect(response.headers.get('location')).toContain('/login?redirect=%2Fadmin%2Fprodutos');
   });
 
-  it('deve permitir acesso público à tela de login /admin/login sem redirecionamento', async () => {
+  it('deve permitir acesso público à tela de login /login sem redirecionamento', async () => {
     mockUser = null;
-    const request = new NextRequest('http://benza.sysfood.local:3000/admin/login', {
+    const request = new NextRequest('http://benza.sysfood.local:3000/login', {
       headers: { host: 'benza.sysfood.local:3000' },
     });
 

@@ -1,6 +1,5 @@
 import React from 'react';
 import type { Metadata } from 'next';
-import '@/app/globals.css';
 
 export const metadata: Metadata = {
   title: 'Portal do Entregador — Entrega em Rota',
@@ -12,12 +11,6 @@ export default function DriverPortalLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <html lang="pt-BR">
-      <body className="bg-stone-100 text-stone-900 antialiased">
-        {children}
-      </body>
-    </html>
-  );
+  return <div className="min-h-screen bg-stone-100 text-stone-900 antialiased">{children}</div>;
 }
 

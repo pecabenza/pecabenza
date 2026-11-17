@@ -12,6 +12,9 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { generateProductJsonLd, generateBreadcrumbJsonLd } from '@/lib/seo/schema';
 import { ProductCommerceAction } from '@/components/cart/ProductCommerceAction';
+import { QuickAddToCartButton } from '@/components/cart/QuickAddToCartButton';
+import { getProductDisplayPrice } from '@/modules/catalog/pricing';
+import { formatBrl } from '@/modules/cart/cart.utils';
 
 interface ProductDetailPageProps {
   params: Promise<{ slug: string }>;
@@ -146,6 +149,7 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                 productSlug={product.slug}
                 coverImageUrl={product.cover_image_url}
                 variants={product.variants || []}
+                modifierGroups={product.modifier_groups || []}
                 siteMode={tenant.site_mode}
               />
 
@@ -255,6 +259,76 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                   </Card>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Sugestões ("Peça também" / "Combina com") */}
+          {product.suggestions && product.suggestions.length > 0 && (
+            <div className="mt-16 pt-12 border-t border-tenant-border/50 space-y-6">
+              <div className="space-y-1">
+                <span className="text-xs uppercase font-bold tracking-widest text-tenant-secondary block">
+                  Sugestões para acompanhar
+                </span>
+                <h2 className="font-heading text-2xl font-bold text-tenant-text">
+                  Peça também
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {product.suggestions.map((suggested) => {
+                  const displayPrice = getProductDisplayPrice(suggested.variants);
+                  return (
+                    <Card
+                      key={suggested.id}
+                      hoverEffect
+                      className="flex flex-col bg-tenant-surface overflow-hidden"
+                    >
+                      <Link
+                        href={`/produtos/${suggested.slug}`}
+                        className="aspect-[16/10] bg-tenant-background relative flex items-center justify-center overflow-hidden border-b border-tenant-border/40"
+                      >
+                        {suggested.cover_image_url ? (
+                          <Image
+                            src={suggested.cover_image_url}
+                            alt={suggested.name}
+                            fill
+                            className="object-cover"
+                            sizes="(max-width: 768px) 100vw, 33vw"
+                          />
+                        ) : (
+                          <span className="font-heading text-2xl font-bold text-tenant-primary/30">
+                            {suggested.name.charAt(0)}
+                          </span>
+                        )}
+                      </Link>
+                      <div className="p-4 flex-1 flex flex-col justify-between gap-3">
+                        <div>
+                          <Link
+                            href={`/produtos/${suggested.slug}`}
+                            className="font-heading font-bold text-base text-tenant-text hover:text-tenant-primary transition-colors line-clamp-1"
+                          >
+                            {suggested.name}
+                          </Link>
+                          {suggested.short_description && (
+                            <p className="text-xs text-tenant-muted line-clamp-2 mt-1">
+                              {suggested.short_description}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-tenant-border/40">
+                          <span className="font-heading font-bold text-sm text-tenant-primary">
+                            {displayPrice ? formatBrl(displayPrice.priceInCents) : ''}
+                          </span>
+                          <QuickAddToCartButton
+                            product={suggested}
+                            siteMode={tenant.site_mode}
+                          />
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
             </div>
           )}
         </Container>

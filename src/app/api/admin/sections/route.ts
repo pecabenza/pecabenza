@@ -15,6 +15,10 @@ import {
 } from '@/modules/cms/schemas';
 import { createSafeErrorResponse } from '@/lib/security/error-response';
 import { logger } from '@/lib/observability/logger';
+import {
+  DEFAULT_SOBRE_SECTIONS,
+  DEFAULT_CONTATO_SECTIONS,
+} from '@/modules/cms/sobre-defaults';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,12 +69,17 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
 
     if (!page) {
+      const pageTitleMap: Record<string, string> = {
+        home: 'Página Inicial',
+        sobre: 'Nossa Proposta',
+        contato: 'Contato',
+      };
       const { data: createdPage, error: createPageErr } = await adminClient
         .from('tenant_pages')
         .insert({
           tenant_id: tenant.id,
           slug: pageSlug,
-          title: pageSlug === 'home' ? 'Página Inicial' : pageSlug,
+          title: pageTitleMap[pageSlug] || pageSlug,
           status: 'published',
         })
         .select('id, title, slug')
@@ -86,7 +95,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 2. Buscar seções cadastradas
-    const { data: sections, error: secError } = await adminClient
+    let { data: sections, error: secError } = await adminClient
       .from('tenant_page_sections')
       .select('*')
       .eq('tenant_id', tenant.id)
@@ -98,6 +107,30 @@ export async function GET(request: NextRequest) {
         { error: 'Erro ao listar seções.' },
         { status: 500 }
       );
+    }
+
+    // 2b. Se for /sobre ou /contato e ainda não houver seções no banco, semear padrões
+    if ((!sections || sections.length === 0) && (pageSlug === 'sobre' || pageSlug === 'contato')) {
+      const seeds = pageSlug === 'sobre' ? DEFAULT_SOBRE_SECTIONS : DEFAULT_CONTATO_SECTIONS;
+      const { data: seeded } = await adminClient
+        .from('tenant_page_sections')
+        .insert(
+          seeds.map((s) => ({
+            tenant_id: tenant.id,
+            page_id: page!.id,
+            section_type: s.section_type,
+            variant: s.variant,
+            display_order: s.display_order,
+            is_active: s.is_active,
+            content: s.content,
+          }))
+        )
+        .select('*')
+        .order('display_order', { ascending: true });
+
+      if (seeded) {
+        sections = seeded;
+      }
     }
 
     return NextResponse.json({

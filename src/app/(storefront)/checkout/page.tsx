@@ -160,6 +160,7 @@ export default function CheckoutPage() {
           variantId: i.variantId,
           quantity: i.quantity,
           clientPriceInCents: i.unitPriceInCents,
+          selectedModifierOptionIds: (i.selectedModifiers || []).map((m) => m.optionId),
         })),
       };
 
@@ -361,6 +362,7 @@ export default function CheckoutPage() {
           variantId: i.variantId,
           quantity: i.quantity,
           clientPriceInCents: i.unitPriceInCents,
+          selectedModifierOptionIds: (i.selectedModifiers || []).map((m) => m.optionId),
         })),
         customer: {
           name: customerName.trim(),
@@ -766,7 +768,7 @@ export default function CheckoutPage() {
                       Local de Retirada:
                     </span>
                     <p>
-                      São Paulo, SP — As instruções e o endereço exato do ateliê culinário serão fornecidos na confirmação do pedido.
+                      Feira de Santana, BA — As instruções e o endereço exato para retirada serão fornecidos na confirmação do pedido.
                     </p>
                   </div>
                 )}

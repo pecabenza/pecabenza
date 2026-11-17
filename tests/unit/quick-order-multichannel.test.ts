@@ -10,6 +10,13 @@ import {
   formatWhatsAppOrderSummary,
   createQuickOrder,
 } from '@/modules/orders/orders.service';
+import {
+  parseBrlInputToCents,
+  clampCartItemQuantity,
+  validateQuickOrderDiscount,
+  buildPosCartItemKey,
+} from '@/modules/orders/quick-order-pos.utils';
+import { generateUniqueShortTrackingToken } from '@/modules/orders/tracking-token';
 
 // Mock do Supabase Admin Client para testes unitários isolados
 const mockRpc = vi.fn();
@@ -346,6 +353,210 @@ describe('Etapa 3C — Pedido Rápido e Atendimento Multicanal (Unit Tests)', ()
       expect(msg).toContain('1x Lasanha Bolonhesa (600g)');
       expect(msg).toContain('Cartão na Entrega');
       expect(msg).toContain('https://pecabenza.com.br/pedido/tok_public_999888777666555444333');
+    });
+  });
+
+  describe('5. Fase 1 & 2 — Parser Monetário BRL, CEP Opcional no PDV e Diferenciação de Complementos', () => {
+    it('deve aceitar entrega no Pedido Rápido sem CEP (sem injetar CEP fictício) e rejeitar CEP malformado', () => {
+      const validWithoutZip = QuickOrderInputSchema.safeParse({
+        orderChannel: 'whatsapp',
+        fulfillmentType: 'delivery',
+        customer: { name: 'Cliente Feira', phone: '75999998888' },
+        items: [{ productId: PRODUCT_ID, variantId: VARIANT_ID, quantity: 1 }],
+        address: {
+          zipCode: '',
+          street: 'Av. Getúlio Vargas',
+          number: '120',
+          neighborhood: 'Centro',
+          city: 'Feira de Santana',
+          state: 'BA',
+        },
+      });
+      expect(validWithoutZip.success).toBe(true);
+
+      const invalidMalformedZip = QuickOrderInputSchema.safeParse({
+        orderChannel: 'whatsapp',
+        fulfillmentType: 'delivery',
+        customer: { name: 'Cliente Feira', phone: '75999998888' },
+        items: [{ productId: PRODUCT_ID, variantId: VARIANT_ID, quantity: 1 }],
+        address: {
+          zipCode: '123',
+          street: 'Av. Getúlio Vargas',
+          number: '120',
+          neighborhood: 'Centro',
+          city: 'Feira de Santana',
+          state: 'BA',
+        },
+      });
+      expect(invalidMalformedZip.success).toBe(false);
+    });
+
+    it('deve converter valores BRL para centavos inteiros com precisão e rejeitar formatos inválidos', () => {
+      expect(parseBrlInputToCents('')).toEqual({ valid: true, cents: 0 });
+      expect(parseBrlInputToCents('36,90')).toEqual({ valid: true, cents: 3690 });
+      expect(parseBrlInputToCents('1.234,56')).toEqual({ valid: true, cents: 123456 });
+      expect(parseBrlInputToCents('15.5')).toEqual({ valid: true, cents: 1550 });
+      expect(parseBrlInputToCents('-10,00').valid).toBe(false);
+      expect(parseBrlInputToCents('abc').valid).toBe(false);
+      expect(parseBrlInputToCents('10,999').valid).toBe(false);
+    });
+
+    it('deve validar descontos por alçada (20% para gerente, até total para admin) e limitar quantidades em 1..99', () => {
+      expect(clampCartItemQuantity(0)).toBe(1);
+      expect(clampCartItemQuantity(150)).toBe(99);
+      expect(clampCartItemQuantity(4)).toBe(4);
+
+      const managerTooHigh = validateQuickOrderDiscount(10000, 1200, 2500, 'tenant_manager');
+      expect(managerTooHigh.valid).toBe(false);
+
+      const managerAllowed = validateQuickOrderDiscount(10000, 1200, 2000, 'tenant_manager');
+      expect(managerAllowed.valid).toBe(true);
+
+      const adminAllowed = validateQuickOrderDiscount(10000, 1200, 5000, 'tenant_admin');
+      expect(adminAllowed.valid).toBe(true);
+    });
+
+    it('deve diferenciar chaves de itens na sacola quando possuírem complementos distintos', () => {
+      const k1 = buildPosCartItemKey('var-1', ['opt-b', 'opt-a']);
+      const k2 = buildPosCartItemKey('var-1', ['opt-a', 'opt-b']);
+      const k3 = buildPosCartItemKey('var-1', []);
+      expect(k1).toBe(k2);
+      expect(k1).not.toBe(k3);
+    });
+
+    it('deve manter 2 itens da mesma variante com complementos diferentes separados no createQuickOrder e somar preços adicionais', async () => {
+      const baseImpl = mockFrom.getMockImplementation();
+      mockFrom.mockImplementation((table: string) => {
+        if (table === 'product_modifier_groups') {
+          return {
+            select: () => ({
+              eq: () => ({
+                in: () => ({
+                  order: async () => ({
+                    data: [
+                      {
+                        id: 'grp-1',
+                        tenant_id: TENANT_ID,
+                        product_id: PRODUCT_ID,
+                        name: 'Adicionais',
+                        is_required: true,
+                        min_selections: 1,
+                        max_selections: 1,
+                        display_order: 1,
+                        options: [
+                          {
+                            id: 'opt-farofa',
+                            tenant_id: TENANT_ID,
+                            group_id: 'grp-1',
+                            name: 'Farofa Artesanal',
+                            price_in_cents: 500,
+                            is_available: true,
+                          },
+                          {
+                            id: 'opt-queijo',
+                            tenant_id: TENANT_ID,
+                            group_id: 'grp-1',
+                            name: 'Queijo Coalho',
+                            price_in_cents: 800,
+                            is_available: true,
+                          },
+                        ],
+                      },
+                    ],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        return baseImpl ? baseImpl(table) : {};
+      });
+
+      // 1) Deve rejeitar se faltar o complemento obrigatório
+      await expect(
+        createQuickOrder(
+          TENANT_ID,
+          {
+            orderChannel: 'whatsapp',
+            fulfillmentType: 'pickup',
+            scheduleType: 'asap',
+            paymentMethod: 'pix',
+            markAsPaidNow: false,
+            discountCents: 0,
+            confirmImmediately: true,
+            customer: { name: 'Maria', phone: '75999990000' },
+            items: [{ productId: PRODUCT_ID, variantId: VARIANT_ID, quantity: 1 }],
+          },
+          { userId: 'u1', role: 'tenant_admin' }
+        )
+      ).rejects.toThrow();
+
+      // 2) Deve manter 2 itens da mesma variante separados com preços e nomes de complementos distintos
+      mockRpc.mockResolvedValueOnce({
+        data: {
+          order_id: 'ord-mods-1',
+          order_number: '#1099',
+          public_tracking_token: '7K9M2P4X8B',
+        },
+        error: null,
+      });
+
+      const created = await createQuickOrder(
+        TENANT_ID,
+        {
+          orderChannel: 'whatsapp',
+          fulfillmentType: 'pickup',
+          scheduleType: 'asap',
+          paymentMethod: 'pix',
+          markAsPaidNow: false,
+          discountCents: 0,
+          confirmImmediately: true,
+          customer: { name: 'Maria', phone: '75999990000' },
+          items: [
+            {
+              productId: PRODUCT_ID,
+              variantId: VARIANT_ID,
+              quantity: 1,
+              selectedModifierOptionIds: ['opt-farofa'],
+            },
+            {
+              productId: PRODUCT_ID,
+              variantId: VARIANT_ID,
+              quantity: 1,
+              selectedModifierOptionIds: ['opt-queijo'],
+            },
+          ],
+        },
+        { userId: 'u1', role: 'tenant_admin' }
+      );
+
+      expect(created.items).toHaveLength(2);
+      expect(created.items[0].variantName).toBe('500ml (+ Farofa Artesanal)');
+      expect(created.items[0].unitPriceInCents).toBe(5000);
+      expect(created.items[1].variantName).toBe('500ml (+ Queijo Coalho)');
+      expect(created.items[1].unitPriceInCents).toBe(5300);
+      expect(created.subtotalInCents).toBe(10300);
+      expect(created.totalInCents).toBe(10300);
+    });
+
+    it('deve regenerar token curto caso haja colisão na primeira tentativa', async () => {
+      let calls = 0;
+      const fakeSupabase = {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => {
+                calls += 1;
+                return { data: calls === 1 ? { id: 'collision-id' } : null };
+              },
+            }),
+          }),
+        }),
+      };
+      const tok = await generateUniqueShortTrackingToken(fakeSupabase);
+      expect(tok).toHaveLength(10);
+      expect(calls).toBe(2);
     });
   });
 });

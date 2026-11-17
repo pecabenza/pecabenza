@@ -4,37 +4,37 @@ import React from 'react';
 import { ShoppingBag, ArrowRight } from 'lucide-react';
 import { useCart } from '@/modules/cart/CartContext';
 
+/**
+ * Barra flutuante mobile exibida apenas quando há itens na sacola,
+ * reutilizando o CartContext existente sem causar layout shift.
+ */
 export function FloatingCartBar() {
-  const { totalItemsCount, formattedSubtotal, openCart, isOpen } = useCart();
+  const { totalItemsCount, formattedSubtotal, openCart } = useCart();
 
-  if (totalItemsCount === 0 || isOpen) return null;
+  if (totalItemsCount <= 0) return null;
 
   return (
-    <div className="fixed bottom-6 inset-x-4 z-40 sm:hidden animate-in slide-in-from-bottom-4 duration-300">
+    <div className="md:hidden fixed bottom-4 left-4 right-4 z-30 animate-in fade-in slide-in-from-bottom-3 duration-200">
       <button
+        type="button"
         onClick={openCart}
-        className="w-full bg-tenant-primary text-white p-4 rounded-2xl shadow-xl flex items-center justify-between font-semibold text-sm hover:brightness-110 active:scale-[0.99] transition-all border border-white/20"
+        className="w-full px-4 py-3.5 rounded-2xl bg-tenant-button hover:bg-tenant-buttonHover text-white shadow-xl flex items-center justify-between gap-3 transition-all active:scale-[0.98]"
       >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-            <ShoppingBag className="w-4 h-4 text-white" />
-          </div>
-          <div className="text-left">
-            <span className="block text-xs text-white/80 uppercase tracking-wider font-bold">
-              {totalItemsCount === 1 ? '1 item na sacola' : `${totalItemsCount} itens na sacola`}
-            </span>
-            <span className="block font-heading text-base font-bold">
-              {formattedSubtotal}
-            </span>
-          </div>
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold">
+            {totalItemsCount}
+          </span>
+          <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+            <ShoppingBag className="w-3.5 h-3.5" />
+            <span>Ver Sacola</span>
+          </span>
         </div>
 
-        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider bg-white/20 px-3 py-1.5 rounded-lg">
-          <span>Ver Sacola</span>
+        <div className="flex items-center gap-1.5 font-heading font-bold text-sm">
+          <span>{formattedSubtotal}</span>
           <ArrowRight className="w-4 h-4" />
         </div>
       </button>
     </div>
   );
 }
-

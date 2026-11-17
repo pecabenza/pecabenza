@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import {
   Zap,
@@ -18,20 +18,34 @@ import {
   QrCode,
   Banknote,
   CreditCard,
-  Copy,
-  Check,
-  Printer,
-  ExternalLink,
   Flame,
   Clock,
   Calendar,
   AlertCircle,
   CheckCircle2,
-  RefreshCw,
-  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  ShoppingBag,
 } from 'lucide-react';
 import { formatBrl } from '@/modules/cart/cart.utils';
+import {
+  parseBrlInputToCents,
+  clampCartItemQuantity,
+  validateQuickOrderDiscount,
+  buildPosCartItemKey,
+} from '@/modules/orders/quick-order-pos.utils';
 import { OrderPrintModal, type PrintTicketMode } from '@/components/admin/orders/OrderPrintModal';
+import { QuickOrderCatalog } from '@/components/admin/quick-order/QuickOrderCatalog';
+import { QuickOrderModifierModal } from '@/components/admin/quick-order/QuickOrderModifierModal';
+import { QuickOrderReviewModal } from '@/components/admin/quick-order/QuickOrderReviewModal';
+import { QuickOrderSuccessPanel } from '@/components/admin/quick-order/QuickOrderSuccessPanel';
+import type {
+  CatalogCategory,
+  CatalogProduct,
+  CatalogVariant,
+  CreatedOrderWithPix,
+  PosCartItem,
+} from '@/components/admin/quick-order/types';
 import type {
   FulfillmentType,
   OrderChannel,
@@ -41,56 +55,8 @@ import type {
 } from '@/types/database.types';
 import type {
   OperationalOrder,
-  QuickOrderCreationResult,
   TenantCustomerHistoryItem,
 } from '@/modules/orders/orders.service';
-
-interface CatalogVariant {
-  id: string;
-  product_id: string;
-  name: string;
-  sku: string | null;
-  unit_type: string;
-  unit_value: number;
-  price_in_cents: number;
-  is_available: boolean;
-}
-
-interface CatalogProduct {
-  id: string;
-  category_id: string | null;
-  name: string;
-  slug: string;
-  short_description: string | null;
-  is_featured: boolean;
-  variants: CatalogVariant[];
-  stationNames: string[];
-}
-
-interface CatalogCategory {
-  id: string;
-  name: string;
-  slug: string;
-}
-
-interface PosCartItem {
-  productId: string;
-  productName: string;
-  variantId: string;
-  variantName: string;
-  unitPriceInCents: number;
-  quantity: number;
-  stationNames: string[];
-}
-
-interface CreatedOrderWithPix extends QuickOrderCreationResult {
-  pixPayment?: {
-    paymentId: string;
-    pixQrCodeText: string;
-    pixQrCodeBase64: string;
-    pixExpiresAt: string;
-  } | null;
-}
 
 const QUICK_KITCHEN_NOTES = [
   'Sem cebola',
@@ -114,7 +80,13 @@ export default function QuickOrderPosPage() {
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
   const [commerceSettings, setCommerceSettings] = useState<TenantCommerceSettings | null>(null);
+  const [dineInEnabled, setDineInEnabled] = useState(false);
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  // Abas no Mobile (Catálogo vs Sacola/Finalização)
+  const [mobileTab, setMobileTab] = useState<'catalog' | 'checkout'>('catalog');
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   // Estado do Pedido Rápido
   const [orderChannel, setOrderChannel] = useState<OrderChannel>('whatsapp');
@@ -130,31 +102,39 @@ export default function QuickOrderPosPage() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
 
-  // Endereço de entrega
+  // Endereço de entrega (Feira de Santana - BA como padrão operacional)
   const [zipCode, setZipCode] = useState('');
   const [street, setStreet] = useState('');
   const [number, setNumber] = useState('');
   const [complement, setComplement] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
-  const [city, setCity] = useState('São Paulo');
-  const [stateUf, setStateUf] = useState('SP');
+  const [city, setCity] = useState('Feira de Santana');
+  const [stateUf, setStateUf] = useState('BA');
   const [reference, setReference] = useState('');
 
-  // Catálogo e Sacola
+  // Catálogo, Sacola e Modal de Complementos
   const [productSearch, setProductSearch] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [cart, setCart] = useState<PosCartItem[]>([]);
   const [kitchenNotes, setKitchenNotes] = useState('');
+  const [pendingModifierSelection, setPendingModifierSelection] = useState<{
+    product: CatalogProduct;
+    variant: CatalogVariant;
+  } | null>(null);
 
   // Financeiro e Confirmação
   const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>('pix');
   const [markAsPaidNow, setMarkAsPaidNow] = useState(false);
   const [cashChangeReais, setCashChangeReais] = useState('');
   const [discountReais, setDiscountReais] = useState('');
+  const [orderNumberOverride, setOrderNumberOverride] = useState('');
+  const [deliveryFeeReais, setDeliveryFeeReais] = useState('');
+  const [deliveryFeeManuallyEdited, setDeliveryFeeManuallyEdited] = useState(false);
   const [confirmImmediately, setConfirmImmediately] = useState(true);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => generateIdempotencyKey());
 
-  // Submissão e Resultado Pós-Pedido
+  // Conferência, Submissão e Resultado Pós-Pedido
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<CreatedOrderWithPix | null>(null);
@@ -163,56 +143,80 @@ export default function QuickOrderPosPage() {
   const [printModalOrder, setPrintModalOrder] = useState<OperationalOrder | null>(null);
   const [printDefaultMode, setPrintDefaultMode] = useState<PrintTicketMode>('full');
 
+  const customerSearchAbortRef = useRef<AbortController | null>(null);
+
   const loadPosData = useCallback(async () => {
+    await Promise.resolve();
     setIsLoadingCatalog(true);
+    setCatalogError(null);
     try {
-      const res = await fetch('/api/admin/orders/quick');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.tenant?.name) setTenantName(data.tenant.name);
-        if (data.operator?.role) setOperatorRole(data.operator.role);
-        setCategories(data.categories || []);
-        setCatalog(data.catalog || []);
-        setCommerceSettings(data.commerceSettings || null);
+      const res = await fetch('/api/admin/orders/quick', { cache: 'no-store' });
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => ({}));
+        throw new Error(errPayload.error || 'Não foi possível carregar o catálogo do PDV.');
       }
-    } catch {
-      // ignora erro transitório
+      const data = await res.json();
+      if (data.tenant?.name) setTenantName(data.tenant.name);
+      if (data.operator?.role) setOperatorRole(data.operator.role);
+      setCategories(data.categories || []);
+      setCatalog(data.catalog || []);
+      setCommerceSettings(data.commerceSettings || null);
+      setDineInEnabled(Boolean(data.dineInEnabled));
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || 'Erro de conexão ao carregar catálogo.';
+      setCatalogError(msg);
     } finally {
       setIsLoadingCatalog(false);
     }
   }, []);
 
   useEffect(() => {
-    loadPosData();
+    const timer = setTimeout(() => {
+      void loadPosData();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadPosData]);
 
-  // Busca reativa de clientes recorrentes por telefone/nome
+  // Busca de clientes recorrentes com AbortController contra condições de corrida
   useEffect(() => {
     const q = customerSearch.trim();
     if (q.length < 3) {
-      setCustomerSuggestions([]);
+      if (customerSearchAbortRef.current) {
+        customerSearchAbortRef.current.abort();
+      }
       return;
     }
 
     const timer = setTimeout(async () => {
+      if (customerSearchAbortRef.current) {
+        customerSearchAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      customerSearchAbortRef.current = controller;
+
       setIsSearchingCustomer(true);
       try {
-        const res = await fetch(`/api/admin/orders/quick?q=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/admin/orders/quick?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
         if (res.ok) {
           const data = await res.json();
           setCustomerSuggestions(data.customers || []);
         }
-      } catch {
-        // ignora erro de rede
+      } catch (err: unknown) {
+        if ((err as { name?: string })?.name === 'AbortError') return;
       } finally {
-        setIsSearchingCustomer(false);
+        if (customerSearchAbortRef.current === controller) {
+          setIsSearchingCustomer(false);
+        }
       }
     }, 260);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [customerSearch]);
 
-  // Troca de canal ajusta defaults inteligentes
   const handleSelectChannel = (ch: OrderChannel) => {
     setOrderChannel(ch);
     if (ch === 'counter') {
@@ -229,7 +233,6 @@ export default function QuickOrderPosPage() {
     }
   };
 
-  // Auto-preenche cliente recorrente + último endereço
   const handleSelectRecurringCustomer = (c: TenantCustomerHistoryItem) => {
     setCustomerName(c.customerName);
     setCustomerPhone(c.customerPhone);
@@ -240,64 +243,94 @@ export default function QuickOrderPosPage() {
       setNumber(c.lastAddress.number || '');
       setComplement(c.lastAddress.complement || '');
       setNeighborhood(c.lastAddress.neighborhood || '');
-      setCity(c.lastAddress.city || 'São Paulo');
-      setStateUf(c.lastAddress.state || 'SP');
+      setCity(c.lastAddress.city || 'Feira de Santana');
+      setStateUf(c.lastAddress.state || 'BA');
       setReference(c.lastAddress.reference || '');
     }
     setCustomerSearch('');
     setCustomerSuggestions([]);
   };
 
-  // Manipulação da sacola
-  const handleAddVariant = (product: CatalogProduct, variant: CatalogVariant) => {
+  const appendCartItem = (
+    product: CatalogProduct,
+    variant: CatalogVariant,
+    modifierPayload?: {
+      selectedModifierOptionIds: string[];
+      extraPriceCents: number;
+      modifierSummary: string;
+    }
+  ) => {
+    if (variant.is_available === false) return;
+
+    const selectedModifierOptionIds = modifierPayload?.selectedModifierOptionIds || [];
+    const extraPriceCents = modifierPayload?.extraPriceCents || 0;
+    const modifierSummary = modifierPayload?.modifierSummary || '';
+    const cartItemKey = buildPosCartItemKey(variant.id, selectedModifierOptionIds);
+    const unitPriceInCents = variant.price_in_cents + extraPriceCents;
+
     setCart((prev) => {
-      const idx = prev.findIndex((i) => i.variantId === variant.id);
+      const idx = prev.findIndex((i) => i.cartItemKey === cartItemKey);
       if (idx >= 0) {
         const updated = [...prev];
         updated[idx] = {
           ...updated[idx],
-          quantity: Math.min(99, updated[idx].quantity + 1),
+          quantity: clampCartItemQuantity(updated[idx].quantity + 1),
         };
         return updated;
       }
       return [
         ...prev,
         {
+          cartItemKey,
           productId: product.id,
           productName: product.name,
           variantId: variant.id,
           variantName: variant.name,
-          unitPriceInCents: variant.price_in_cents,
+          baseUnitPriceInCents: variant.price_in_cents,
+          extraPriceCents,
+          unitPriceInCents,
           quantity: 1,
+          selectedModifierOptionIds,
+          modifierSummary,
           stationNames: product.stationNames || [],
         },
       ];
     });
   };
 
-  const handleUpdateQuantity = (variantId: string, delta: number) => {
+  const handleSelectVariantFromCatalog = (product: CatalogProduct, variant: CatalogVariant) => {
+    if (variant.is_available === false) return;
+    if ((product.modifierGroups?.length || 0) > 0) {
+      setPendingModifierSelection({ product, variant });
+      return;
+    }
+    appendCartItem(product, variant);
+  };
+
+  const handleUpdateQuantity = (cartItemKey: string, delta: number) => {
     setCart((prev) =>
       prev
-        .map((item) =>
-          item.variantId === variantId
-            ? { ...item, quantity: item.quantity + delta }
-            : item
-        )
+        .map((item) => {
+          if (item.cartItemKey !== cartItemKey) return item;
+          const nextQty = item.quantity + delta;
+          if (nextQty <= 0) return { ...item, quantity: 0 };
+          return { ...item, quantity: clampCartItemQuantity(nextQty) };
+        })
         .filter((item) => item.quantity > 0)
     );
   };
 
-  const handleRemoveItem = (variantId: string) => {
-    setCart((prev) => prev.filter((item) => item.variantId !== variantId));
+  const handleRemoveItem = (cartItemKey: string) => {
+    setCart((prev) => prev.filter((item) => item.cartItemKey !== cartItemKey));
   };
 
-  // Cálculos de valores em tempo real
+  // Cálculos determinísticos em centavos inteiros
   const subtotalCents = useMemo(
     () => cart.reduce((acc, item) => acc + item.unitPriceInCents * item.quantity, 0),
     [cart]
   );
 
-  const deliveryFeeCents = useMemo(() => {
+  const defaultDeliveryFeeCents = useMemo(() => {
     if (fulfillmentType !== 'delivery') return 0;
     if (!commerceSettings) return 1200;
     if (
@@ -309,44 +342,40 @@ export default function QuickOrderPosPage() {
     return commerceSettings.fixed_delivery_fee_cents || 0;
   }, [fulfillmentType, commerceSettings, subtotalCents]);
 
-  const discountCents = useMemo(() => {
-    const parsed = parseFloat(discountReais.replace(',', '.'));
-    if (Number.isNaN(parsed) || parsed <= 0) return 0;
-    return Math.round(parsed * 100);
-  }, [discountReais]);
+  const parsedDeliveryFee = useMemo(
+    () => parseBrlInputToCents(deliveryFeeReais),
+    [deliveryFeeReais]
+  );
+
+  const deliveryFeeCents = useMemo(() => {
+    if (fulfillmentType !== 'delivery') return 0;
+    if (!deliveryFeeManuallyEdited) return defaultDeliveryFeeCents;
+    return parsedDeliveryFee.valid ? parsedDeliveryFee.cents : defaultDeliveryFeeCents;
+  }, [fulfillmentType, deliveryFeeManuallyEdited, parsedDeliveryFee, defaultDeliveryFeeCents]);
+
+  const parsedDiscount = useMemo(() => parseBrlInputToCents(discountReais), [discountReais]);
+  const discountCents = parsedDiscount.valid ? parsedDiscount.cents : 0;
+
+  const discountValidation = useMemo(
+    () => validateQuickOrderDiscount(subtotalCents, deliveryFeeCents, discountCents, operatorRole),
+    [subtotalCents, deliveryFeeCents, discountCents, operatorRole]
+  );
 
   const totalCents = useMemo(
     () => Math.max(0, subtotalCents + deliveryFeeCents - discountCents),
     [subtotalCents, deliveryFeeCents, discountCents]
   );
 
+  const parsedCashChange = useMemo(() => parseBrlInputToCents(cashChangeReais), [cashChangeReais]);
   const cashChangeForCents = useMemo(() => {
-    if (paymentMethod !== 'cash') return null;
-    const parsed = parseFloat(cashChangeReais.replace(',', '.'));
-    if (Number.isNaN(parsed) || parsed <= 0) return null;
-    return Math.round(parsed * 100);
-  }, [paymentMethod, cashChangeReais]);
+    if (paymentMethod !== 'cash' || !cashChangeReais.trim()) return null;
+    return parsedCashChange.valid && parsedCashChange.cents > 0 ? parsedCashChange.cents : null;
+  }, [paymentMethod, cashChangeReais, parsedCashChange]);
 
   const cashChangeReturnCents = useMemo(() => {
     if (!cashChangeForCents || cashChangeForCents < totalCents) return null;
     return cashChangeForCents - totalCents;
   }, [cashChangeForCents, totalCents]);
-
-  const filteredProducts = useMemo(() => {
-    return catalog.filter((p) => {
-      if (selectedCategoryId !== 'all' && p.category_id !== selectedCategoryId) {
-        return false;
-      }
-      if (productSearch.trim()) {
-        const term = productSearch.toLowerCase();
-        const matchesName = p.name.toLowerCase().includes(term);
-        const matchesDesc = (p.short_description || '').toLowerCase().includes(term);
-        const matchesVariant = p.variants.some((v) => v.name.toLowerCase().includes(term));
-        if (!matchesName && !matchesDesc && !matchesVariant) return false;
-      }
-      return true;
-    });
-  }, [catalog, selectedCategoryId, productSearch]);
 
   const handleAppendQuickNote = (noteText: string) => {
     setKitchenNotes((prev) => {
@@ -356,91 +385,189 @@ export default function QuickOrderPosPage() {
     });
   };
 
+  // Reset completo e seguro entre pedidos (sem vazar endereço, agendamento ou cliente anterior)
   const handleResetNewOrder = () => {
     setCart([]);
     setKitchenNotes('');
     setDiscountReais('');
+    setOrderNumberOverride('');
+    setDeliveryFeeReais('');
+    setDeliveryFeeManuallyEdited(false);
     setCashChangeReais('');
     setMarkAsPaidNow(false);
+    setPaymentMethod('pix');
+    setScheduleType('asap');
+    setScheduledForInput('');
     setSubmitError(null);
     setCreatedOrder(null);
+    setIsReviewOpen(false);
     setIdempotencyKey(generateIdempotencyKey());
+    setCustomerSearch('');
+    setCustomerSuggestions([]);
+    setCustomerEmail('');
+    setZipCode('');
+    setStreet('');
+    setNumber('');
+    setComplement('');
+    setNeighborhood('');
+    setCity('Feira de Santana');
+    setStateUf('BA');
+    setReference('');
+
     if (orderChannel === 'counter') {
       setCustomerName('Cliente Balcão');
       setCustomerPhone('');
+      setFulfillmentType('pickup');
     } else {
       setCustomerName('');
       setCustomerPhone('');
     }
-    setCustomerEmail('');
   };
 
-  const buildOperationalOrderForPrint = (ord: CreatedOrderWithPix): OperationalOrder => {
-    return {
-      id: ord.orderId,
-      tenantId: '',
-      orderNumber: ord.orderNumber,
-      publicTrackingToken: ord.publicTrackingToken,
-      orderChannel: ord.orderChannel,
-      customerName: ord.customerName,
-      customerPhone: ord.customerPhone,
-      fulfillmentType: ord.fulfillmentType,
-      scheduleType: ord.scheduleType,
-      scheduledFor: ord.scheduledFor,
-      status: ord.status,
-      paymentMethod: ord.paymentMethod,
-      paymentStatus: ord.paymentStatus,
-      cashChangeForCents: ord.cashChangeForCents,
-      subtotalCents: ord.subtotalInCents,
-      deliveryFeeCents: ord.deliveryFeeInCents,
-      discountCents: ord.discountInCents,
-      totalCents: ord.totalInCents,
-      formattedTotal: ord.formattedTotal,
-      notes: ord.notes,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      elapsedMinutes: 0,
-      statusElapsedMinutes: 0,
-      isDelayed: false,
-      isUrgent: false,
-      items: ord.items.map((it, idx) => ({
-        id: `${it.variantId}-${idx}`,
-        quantity: it.quantity,
-        productName: it.productName,
-        variantName: it.variantName,
-        unitPriceCents: it.unitPriceInCents,
-        subtotalCents: it.subtotalInCents,
-      })),
-      itemCount: ord.items.reduce((acc, i) => acc + i.quantity, 0),
-      address: ord.address
-        ? {
-            street: ord.address.street,
-            number: ord.address.number,
-            complement: ord.address.complement,
-            neighborhood: ord.address.neighborhood,
-            city: ord.address.city,
-            state: ord.address.state,
-            reference: ord.address.reference,
-          }
-        : null,
-      nextValidStatuses: [],
-    };
+  const buildOperationalOrderForPrint = (ord: CreatedOrderWithPix): OperationalOrder => ({
+    id: ord.orderId,
+    tenantId: '',
+    orderNumber: ord.orderNumber,
+    publicTrackingToken: ord.publicTrackingToken,
+    orderChannel: ord.orderChannel,
+    customerName: ord.customerName,
+    customerPhone: ord.customerPhone,
+    fulfillmentType: ord.fulfillmentType,
+    scheduleType: ord.scheduleType,
+    scheduledFor: ord.scheduledFor,
+    status: ord.status,
+    paymentMethod: ord.paymentMethod,
+    paymentStatus: ord.paymentStatus,
+    cashChangeForCents: ord.cashChangeForCents,
+    subtotalCents: ord.subtotalInCents,
+    deliveryFeeCents: ord.deliveryFeeInCents,
+    discountCents: ord.discountInCents,
+    totalCents: ord.totalInCents,
+    formattedTotal: ord.formattedTotal,
+    notes: ord.notes,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    elapsedMinutes: 0,
+    statusElapsedMinutes: 0,
+    isDelayed: false,
+    isUrgent: false,
+    items: ord.items.map((it, idx) => ({
+      id: `${it.variantId}-${idx}`,
+      quantity: it.quantity,
+      productName: it.productName,
+      variantName: it.variantName,
+      unitPriceCents: it.unitPriceInCents,
+      subtotalCents: it.subtotalInCents,
+    })),
+    itemCount: ord.items.reduce((acc, i) => acc + i.quantity, 0),
+    address: ord.address
+      ? {
+          street: ord.address.street,
+          number: ord.address.number,
+          complement: ord.address.complement,
+          neighborhood: ord.address.neighborhood,
+          city: ord.address.city,
+          state: ord.address.state,
+          reference: ord.address.reference,
+        }
+      : null,
+    nextValidStatuses: [],
+  });
+
+  // Validação local preventiva antes de abrir a etapa de conferência
+  const validateBeforeReview = (): string | null => {
+    if (cart.length === 0) {
+      return 'Adicione pelo menos 1 item à sacola antes de continuar.';
+    }
+
+    const effectiveName =
+      customerName.trim() || (orderChannel === 'counter' ? 'Cliente Balcão' : '');
+    if (effectiveName.length < 2) {
+      return 'Informe o nome do cliente (mínimo 2 caracteres).';
+    }
+
+    const cleanPhone = customerPhone.replace(/\D/g, '');
+    if (
+      (orderChannel === 'whatsapp' ||
+        orderChannel === 'phone' ||
+        fulfillmentType === 'delivery') &&
+      cleanPhone.length < 10
+    ) {
+      return 'Informe um telefone/WhatsApp válido com DDD para este canal ou entrega.';
+    }
+
+    if (fulfillmentType === 'delivery') {
+      if (street.trim().length < 2) return 'Informe a Rua/Logradouro para entrega.';
+      if (number.trim().length < 1) return 'Informe o número do endereço (ou S/N).';
+      if (neighborhood.trim().length < 2) return 'Informe o bairro para entrega.';
+      if (city.trim().length < 2) return 'Informe a cidade para entrega.';
+      if (stateUf.trim().length !== 2) return 'Informe a UF com 2 letras (ex: BA).';
+      if (zipCode.trim() && !/^[0-9]{5}-?[0-9]{3}$/.test(zipCode.trim())) {
+        return 'O CEP informado é inválido. Use 8 dígitos (ex: 44000-000) ou deixe em branco.';
+      }
+      if (deliveryFeeManuallyEdited && !parsedDeliveryFee.valid) {
+        return parsedDeliveryFee.error || 'Taxa de entrega em formato inválido.';
+      }
+    }
+
+    if (scheduleType === 'scheduled') {
+      if (!scheduledForInput) {
+        return 'Selecione a data e o horário para o pedido agendado.';
+      }
+      const schedDate = new Date(scheduledForInput);
+      if (Number.isNaN(schedDate.getTime()) || schedDate.getTime() < Date.now() - 60000) {
+        return 'O horário de agendamento deve estar no futuro.';
+      }
+    }
+
+    if (!parsedDiscount.valid) {
+      return parsedDiscount.error || 'Valor de desconto em formato inválido.';
+    }
+
+    if (!discountValidation.valid) {
+      return discountValidation.error || 'Desconto acima do limite permitido.';
+    }
+
+    if (paymentMethod === 'cash' && cashChangeReais.trim()) {
+      if (!parsedCashChange.valid) {
+        return parsedCashChange.error || 'Valor de troco em formato inválido.';
+      }
+      if (parsedCashChange.cents > 0 && parsedCashChange.cents < totalCents) {
+        return `O valor para troco (${formatBrl(parsedCashChange.cents)}) deve ser maior ou igual ao total (${formatBrl(totalCents)}).`;
+      }
+    }
+
+    return null;
   };
 
-  const handleSubmitOrder = async (e: React.FormEvent) => {
+  const handleOpenReview = (e: React.FormEvent) => {
     e.preventDefault();
+    const validationErr = validateBeforeReview();
+    if (validationErr) {
+      setSubmitError(validationErr);
+      return;
+    }
+    setSubmitError(null);
+    setIsReviewOpen(true);
+  };
+
+  const handleConfirmAndSubmitOrder = async () => {
     if (cart.length === 0 || isSubmitting) return;
 
     setSubmitError(null);
     setIsSubmitting(true);
 
     try {
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         orderChannel,
         items: cart.map((item) => ({
           productId: item.productId,
           variantId: item.variantId,
           quantity: item.quantity,
+          selectedModifierOptionIds:
+            item.selectedModifierOptionIds.length > 0
+              ? item.selectedModifierOptionIds
+              : undefined,
         })),
         customer: {
           name: customerName.trim() || (orderChannel === 'counter' ? 'Cliente Balcão' : ''),
@@ -460,6 +587,9 @@ export default function QuickOrderPosPage() {
             : false,
         cashChangeForCents: paymentMethod === 'cash' ? cashChangeForCents : null,
         discountCents,
+        deliveryFeeCentsOverride:
+          fulfillmentType === 'delivery' && deliveryFeeManuallyEdited ? deliveryFeeCents : null,
+        orderNumberOverride: orderNumberOverride.trim() || undefined,
         confirmImmediately,
         notes: kitchenNotes.trim() || undefined,
         idempotencyKey,
@@ -468,13 +598,13 @@ export default function QuickOrderPosPage() {
 
       if (fulfillmentType === 'delivery') {
         payload.address = {
-          zipCode: zipCode.trim() || '01310-100',
+          zipCode: zipCode.trim(),
           street: street.trim(),
           number: number.trim(),
           complement: complement.trim() || undefined,
           neighborhood: neighborhood.trim(),
-          city: city.trim() || 'São Paulo',
-          state: (stateUf.trim() || 'SP').toUpperCase(),
+          city: city.trim() || 'Feira de Santana',
+          state: (stateUf.trim() || 'BA').toUpperCase(),
           reference: reference.trim() || undefined,
         };
       }
@@ -490,16 +620,24 @@ export default function QuickOrderPosPage() {
         throw new Error(data.error || 'Falha ao criar pedido rápido.');
       }
 
+      setIsReviewOpen(false);
       setCreatedOrder(data);
-    } catch (err: any) {
-      setSubmitError(err.message || 'Erro ao registrar pedido.');
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message || 'Erro ao registrar pedido.';
+      setSubmitError(msg);
+      setIsReviewOpen(false);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const totalItemsCount = useMemo(
+    () => cart.reduce((acc, item) => acc + item.quantity, 0),
+    [cart]
+  );
+
   return (
-    <div className="space-y-5 pb-16">
+    <div className="space-y-5 pb-20">
       {/* Cabeçalho do PDV / Pedido Rápido Multicanal */}
       <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -524,13 +662,13 @@ export default function QuickOrderPosPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <Link
             href="/admin/operacao"
-            className="px-3.5 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition-colors"
+            className="min-h-[38px] inline-flex items-center px-3.5 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold transition-colors"
           >
             Fila Operacional
           </Link>
           <Link
             href="/admin/kds"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
+            className="min-h-[38px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
           >
             <Flame className="w-4 h-4" />
             <span>Abrir KDS Cozinha</span>
@@ -538,526 +676,247 @@ export default function QuickOrderPosPage() {
         </div>
       </div>
 
-      {/* Painel de Sucesso Pós-Pedido (Com QR Code Pix, Cópia WhatsApp e Impressão 58mm/80mm) */}
+      {/* Painel de Sucesso Pós-Pedido */}
       {createdOrder && (
-        <div className="bg-emerald-950 text-white rounded-2xl p-6 border-2 border-emerald-500 shadow-xl space-y-5 animate-fade-in">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-emerald-800 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-emerald-950 flex items-center justify-center font-black">
-                <CheckCircle2 className="w-7 h-7" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-2xl font-black font-mono text-emerald-300">
-                    {createdOrder.orderNumber}
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-800 text-emerald-200 uppercase">
-                    {createdOrder.status === 'confirmed'
-                      ? 'Confirmado no KDS'
-                      : 'Aguardando Confirmação'}
-                  </span>
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
-                      createdOrder.paymentStatus === 'paid'
-                        ? 'bg-emerald-400 text-emerald-950'
-                        : 'bg-amber-400 text-amber-950'
-                    }`}
-                  >
-                    Pgto: {createdOrder.paymentStatus === 'paid' ? 'Pago' : 'Pendente'}
-                  </span>
-                </div>
-                <p className="text-xs text-emerald-200 mt-1">
-                  Cliente: <strong>{createdOrder.customerName}</strong> • Total:{' '}
-                  <strong>{createdOrder.formattedTotal}</strong>
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  setPrintDefaultMode('full');
-                  setPrintModalOrder(buildOperationalOrderForPrint(createdOrder));
-                }}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white text-stone-900 hover:bg-stone-100 text-xs font-black transition-all shadow-sm"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Imprimir Comanda (58mm / 80mm)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setPrintDefaultMode('kitchen');
-                  setPrintModalOrder(buildOperationalOrderForPrint(createdOrder));
-                }}
-                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-black transition-all"
-              >
-                <Flame className="w-4 h-4" />
-                <span>Imprimir Via Cozinha</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleResetNewOrder}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400 transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Novo Pedido Rápido</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Coluna 1: Resumo para WhatsApp + Link Público */}
-            <div className="bg-emerald-900/60 rounded-xl p-4 border border-emerald-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
-                  <MessageCircle className="w-4 h-4" />
-                  Resumo Pronto para WhatsApp + Link de Rastreio
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(createdOrder.whatsappSummaryText);
-                      setCopiedWhatsApp(true);
-                      setTimeout(() => setCopiedWhatsApp(false), 2500);
-                    }}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-emerald-950 text-xs font-black transition-colors"
-                  >
-                    {copiedWhatsApp ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedWhatsApp ? 'Copiado!' : 'Copiar Resumo'}</span>
-                  </button>
-
-                  {createdOrder.customerPhone && (
-                    <a
-                      href={`https://wa.me/55${createdOrder.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                        createdOrder.whatsappSummaryText
-                      )}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Enviar no WhatsApp</span>
-                    </a>
-                  )}
-                </div>
-              </div>
-
-              <pre className="text-xs font-mono bg-emerald-950/90 p-3 rounded-lg border border-emerald-800/80 whitespace-pre-wrap text-emerald-100 max-h-48 overflow-y-auto">
-                {createdOrder.whatsappSummaryText}
-              </pre>
-
-              <div className="flex items-center justify-between text-xs pt-1 text-emerald-200">
-                <span>Link público de acompanhamento:</span>
-                <Link
-                  href={`/pedido/${createdOrder.publicTrackingToken}`}
-                  target="_blank"
-                  className="underline font-bold hover:text-white flex items-center gap-1"
-                >
-                  <span>/pedido/{createdOrder.publicTrackingToken.slice(0, 12)}...</span>
-                  <ExternalLink className="w-3 h-3" />
-                </Link>
-              </div>
-            </div>
-
-            {/* Coluna 2: Cobrança Pix (se método = Pix) ou Detalhes de Recebimento */}
-            {createdOrder.paymentMethod === 'pix' && createdOrder.pixPayment ? (
-              <div className="bg-emerald-900/60 rounded-xl p-4 border border-emerald-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
-                    <QrCode className="w-4 h-4" />
-                    Cobrança Pix Gerada (Aguardando Confirmação)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(createdOrder.pixPayment?.pixQrCodeText || '');
-                      setCopiedPix(true);
-                      setTimeout(() => setCopiedPix(false), 2500);
-                    }}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-black transition-colors"
-                  >
-                    {copiedPix ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedPix ? 'Pix Copiado!' : 'Copiar Pix Copia e Cola'}</span>
-                  </button>
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-center gap-4">
-                  {createdOrder.pixPayment.pixQrCodeBase64 && (
-                    <div className="bg-white p-2 rounded-xl shrink-0">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={createdOrder.pixPayment.pixQrCodeBase64}
-                        alt="QR Code Pix"
-                        className="w-28 h-28 object-contain"
-                      />
-                    </div>
-                  )}
-                  <div className="flex-1 space-y-2 w-full">
-                    <div className="text-xs text-emerald-100">
-                      Envie o código <strong>Pix Copia e Cola</strong> abaixo para o cliente no WhatsApp ou mostre o QR Code no balcão:
-                    </div>
-                    <input
-                      type="text"
-                      readOnly
-                      value={createdOrder.pixPayment.pixQrCodeText}
-                      className="w-full px-3 py-2 rounded-lg bg-emerald-950 border border-emerald-800 text-[11px] font-mono text-emerald-200"
-                    />
-                    <p className="text-[11px] text-amber-300">
-                      🔒 Segurança Financeira: o status financeiro permanece como{' '}
-                      <strong>Pendente</strong> até a confirmação pelo webhook ou conferência auditada.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-emerald-900/60 rounded-xl p-4 border border-emerald-800 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
-                    Resumo Financeiro & Produção
-                  </span>
-                  <p className="text-sm text-emerald-100">
-                    Pedido enviado para as estações configuradas no KDS ({createdOrder.items.length}{' '}
-                    item(ns)).
-                  </p>
-                  {createdOrder.paymentMethod === 'cash' && createdOrder.cashChangeForCents && (
-                    <div className="p-3 rounded-lg bg-emerald-950 border border-emerald-700 text-xs space-y-1">
-                      <div>
-                        Troco solicitado para:{' '}
-                        <strong>{formatBrl(createdOrder.cashChangeForCents)}</strong>
-                      </div>
-                      {createdOrder.cashChangeAmountCents !== null && (
-                        <div className="text-emerald-300 font-black text-sm">
-                          Troco a devolver: {formatBrl(createdOrder.cashChangeAmountCents)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="pt-3 text-xs text-emerald-300">
-                  Use os botões no topo deste card para imprimir a comanda térmica em 58mm ou 80mm.
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <QuickOrderSuccessPanel
+          createdOrder={createdOrder}
+          copiedWhatsApp={copiedWhatsApp}
+          copiedPix={copiedPix}
+          onCopyWhatsApp={() => {
+            navigator.clipboard.writeText(createdOrder.whatsappSummaryText);
+            setCopiedWhatsApp(true);
+            setTimeout(() => setCopiedWhatsApp(false), 2500);
+          }}
+          onCopyPix={() => {
+            if (!createdOrder.pixPayment) return;
+            navigator.clipboard.writeText(createdOrder.pixPayment.pixQrCodeText);
+            setCopiedPix(true);
+            setTimeout(() => setCopiedPix(false), 2500);
+          }}
+          onOpenPrintModal={(mode) => {
+            setPrintDefaultMode(mode);
+            setPrintModalOrder(buildOperationalOrderForPrint(createdOrder));
+          }}
+          onStartNewOrder={handleResetNewOrder}
+        />
       )}
 
-      {/* Grid Principal PDV: Esquerda = Catálogo Rápido | Direita = Atendimento + Checkout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* COLUNA ESQUERDA (7 cols): Catálogo Rápido de Produtos e Variantes */}
-        <div className="lg:col-span-7 bg-white rounded-2xl border border-stone-200 shadow-xs p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <h2 className="font-heading font-black text-base text-stone-900">
-              1. Catálogo Rápido de Produtos
-            </h2>
+      {/* Alternador Mobile: Catálogo vs Sacola */}
+      <div className="flex xl:hidden bg-white rounded-xl p-1.5 border border-stone-200 shadow-2xs gap-1.5">
+        <button
+          type="button"
+          onClick={() => setMobileTab('catalog')}
+          className={`flex-1 min-h-[40px] py-2 px-3 rounded-lg text-xs font-black transition-colors ${
+            mobileTab === 'catalog'
+              ? 'bg-stone-900 text-white'
+              : 'bg-stone-100 text-stone-700'
+          }`}
+        >
+          1. Catálogo ({catalog.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab('checkout')}
+          className={`flex-1 min-h-[40px] py-2 px-3 rounded-lg text-xs font-black transition-colors ${
+            mobileTab === 'checkout'
+              ? 'bg-emerald-600 text-white'
+              : 'bg-stone-100 text-stone-700'
+          }`}
+        >
+          2. Sacola & Finalizar ({totalItemsCount} • {formatBrl(totalCents)})
+        </button>
+      </div>
 
-            {/* Busca de Produtos */}
-            <div className="relative flex-1 max-w-sm">
-              <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={productSearch}
-                onChange={(e) => setProductSearch(e.target.value)}
-                placeholder="Buscar prato ou porção..."
-                className="w-full pl-9 pr-3 py-2 rounded-xl bg-stone-100 text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
-          </div>
+      {/* Layout Principal do PDV: 2 Colunas no Desktop */}
+      <form onSubmit={handleOpenReview} className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+        {/* COLUNA ESQUERDA (7 cols): Canal + Cliente + Catálogo */}
+        <div
+          className={`xl:col-span-7 space-y-5 ${
+            mobileTab === 'checkout' ? 'hidden xl:block' : 'block'
+          }`}
+        >
+          {/* 1. Seleção de Canal e Modalidade */}
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-stone-200 shadow-xs space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <span className="block text-xs font-black uppercase tracking-wider text-stone-500 mb-2">
+                  1. Canal de Entrada
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectChannel('whatsapp')}
+                    aria-pressed={orderChannel === 'whatsapp'}
+                    className={`min-h-[42px] py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      orderChannel === 'whatsapp'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>WhatsApp</span>
+                  </button>
 
-          {/* Abas de Categoria */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-            <button
-              type="button"
-              onClick={() => setSelectedCategoryId('all')}
-              className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors ${
-                selectedCategoryId === 'all'
-                  ? 'bg-stone-900 text-white'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              Todos ({catalog.length})
-            </button>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setSelectedCategoryId(cat.id)}
-                className={`px-3 py-1.5 rounded-lg font-bold whitespace-nowrap transition-colors ${
-                  selectedCategoryId === cat.id
-                    ? 'bg-stone-900 text-white'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-                }`}
-              >
-                {cat.name}
-              </button>
-            ))}
-          </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectChannel('phone')}
+                    aria-pressed={orderChannel === 'phone'}
+                    className={`min-h-[42px] py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      orderChannel === 'phone'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <Phone className="w-4 h-4" />
+                    <span>Telefone</span>
+                  </button>
 
-          {/* Lista de Produtos com Adição em 1 Clique */}
-          {isLoadingCatalog ? (
-            <div className="py-16 text-center text-xs text-stone-400 flex flex-col items-center gap-2">
-              <RefreshCw className="w-6 h-6 animate-spin text-stone-400" />
-              <span>Carregando cardápio ativo...</span>
-            </div>
-          ) : filteredProducts.length === 0 ? (
-            <div className="py-12 text-center text-xs text-stone-400">
-              Nenhum produto encontrado para o filtro selecionado.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[680px] overflow-y-auto pr-1">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className="p-3.5 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/50 flex flex-col justify-between gap-3 transition-all"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-heading font-bold text-sm text-stone-900 leading-snug">
-                        {product.name}
-                      </h3>
-                      {product.stationNames.length > 0 && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 shrink-0">
-                          {product.stationNames.join(' → ')}
-                        </span>
-                      )}
-                    </div>
-                    {product.short_description && (
-                      <p className="text-[11px] text-stone-500 line-clamp-1 mt-0.5">
-                        {product.short_description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Botões de Variantes / Porções */}
-                  <div className="space-y-1.5 pt-1 border-t border-stone-200/70">
-                    {product.variants.map((variant) => {
-                      const inCart = cart.find((c) => c.variantId === variant.id);
-                      return (
-                        <div
-                          key={variant.id}
-                          className="flex items-center justify-between gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-stone-200/90"
-                        >
-                          <div className="text-xs">
-                            <span className="font-bold text-stone-800">{variant.name}</span>
-                            <span className="block font-mono font-black text-emerald-700 text-xs">
-                              {formatBrl(variant.price_in_cents)}
-                            </span>
-                          </div>
-
-                          {inCart ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateQuantity(variant.id, -1)}
-                                className="w-7 h-7 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 flex items-center justify-center font-bold"
-                                aria-label="Diminuir quantidade"
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
-                              <span className="w-6 text-center font-mono font-black text-xs text-stone-900">
-                                {inCart.quantity}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateQuantity(variant.id, 1)}
-                                className="w-7 h-7 rounded-lg bg-stone-900 hover:bg-stone-800 text-white flex items-center justify-center font-bold"
-                                aria-label="Aumentar quantidade"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleAddVariant(product, variant)}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-stone-900 hover:bg-amber-600 text-white text-xs font-bold transition-colors"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                              <span>Adicionar</span>
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectChannel('counter')}
+                    aria-pressed={orderChannel === 'counter'}
+                    className={`min-h-[42px] py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      orderChannel === 'counter'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <Store className="w-4 h-4" />
+                    <span>Balcão</span>
+                  </button>
                 </div>
-              ))}
+              </div>
+
+              <div>
+                <span className="block text-xs font-black uppercase tracking-wider text-stone-500 mb-2">
+                  2. Modalidade de Atendimento
+                </span>
+                <div className={`grid ${dineInEnabled ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+                  <button
+                    type="button"
+                    onClick={() => setFulfillmentType('pickup')}
+                    aria-pressed={fulfillmentType === 'pickup'}
+                    className={`min-h-[42px] py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      fulfillmentType === 'pickup'
+                        ? 'bg-stone-900 text-white border-stone-900 shadow-sm'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <Store className="w-4 h-4" />
+                    <span>Retirada</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFulfillmentType('delivery')}
+                    aria-pressed={fulfillmentType === 'delivery'}
+                    className={`min-h-[42px] py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                      fulfillmentType === 'delivery'
+                        ? 'bg-stone-900 text-white border-stone-900 shadow-sm'
+                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    <Truck className="w-4 h-4" />
+                    <span>Entrega</span>
+                  </button>
+
+                  {dineInEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentType('dine_in')}
+                      aria-pressed={fulfillmentType === 'dine_in'}
+                      className={`min-h-[42px] py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+                        fulfillmentType === 'dine_in'
+                          ? 'bg-stone-900 text-white border-stone-900 shadow-sm'
+                          : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                      }`}
+                    >
+                      <Utensils className="w-4 h-4" />
+                      <span>No Local</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-          )}
+          </div>
+
+          {/* 2. Catálogo Rápido de Produtos */}
+          <QuickOrderCatalog
+            categories={categories}
+            catalog={catalog}
+            isLoadingCatalog={isLoadingCatalog}
+            catalogError={catalogError}
+            onRetryLoadCatalog={loadPosData}
+            selectedCategoryId={selectedCategoryId}
+            onSelectCategoryId={setSelectedCategoryId}
+            productSearch={productSearch}
+            onChangeProductSearch={setProductSearch}
+            onSelectVariant={handleSelectVariantFromCatalog}
+          />
         </div>
 
-        {/* COLUNA DIREITA (5 cols): Canal, Cliente, Sacola, Pagamento e Finalização */}
-        <form
-          onSubmit={handleSubmitOrder}
-          className="lg:col-span-5 bg-white rounded-2xl border border-stone-200 shadow-xs p-5 space-y-5"
+        {/* COLUNA DIREITA (5 cols): Cliente, Endereço, Sacola, Pagamento e Revisão */}
+        <div
+          className={`xl:col-span-5 space-y-4 ${
+            mobileTab === 'catalog' ? 'hidden xl:block' : 'block'
+          }`}
         >
-          {/* 2. Seletor de Canal do Pedido */}
-          <div className="space-y-2">
-            <label className="block text-xs font-black uppercase tracking-wider text-stone-600">
-              2. Canal de Origem do Atendimento
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle, activeClass: 'bg-emerald-600 text-white border-emerald-600' },
-                { id: 'phone', label: 'Telefone', icon: Phone, activeClass: 'bg-blue-600 text-white border-blue-600' },
-                { id: 'counter', label: 'Balcão / Presencial', icon: Store, activeClass: 'bg-amber-600 text-white border-amber-600' },
-              ].map((ch) => {
-                const Icon = ch.icon;
-                const isSelected = orderChannel === ch.id;
-                return (
-                  <button
-                    key={ch.id}
-                    type="button"
-                    onClick={() => handleSelectChannel(ch.id as OrderChannel)}
-                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                      isSelected
-                        ? ch.activeClass
-                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span>{ch.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 3. Modalidade de Recebimento e Horário */}
-          <div className="space-y-2 pt-2 border-t border-stone-100">
-            <label className="block text-xs font-black uppercase tracking-wider text-stone-600">
-              3. Modalidade de Atendimento
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'pickup', label: 'Retirada', icon: Store },
-                { id: 'delivery', label: 'Entrega', icon: Truck },
-                { id: 'dine_in', label: 'Consumo Local', icon: Utensils },
-              ].map((m) => {
-                const Icon = m.icon;
-                const active = fulfillmentType === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setFulfillmentType(m.id as FulfillmentType)}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                      active
-                        ? 'bg-stone-900 text-white border-stone-900'
-                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{m.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Imediato vs Agendado */}
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setScheduleType('asap')}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold border flex items-center justify-center gap-1.5 ${
-                  scheduleType === 'asap'
-                    ? 'bg-amber-50 text-amber-900 border-amber-300'
-                    : 'bg-white text-stone-600 border-stone-200'
-                }`}
-              >
-                <Clock className="w-3.5 h-3.5" />
-                <span>Preparo Imediato (Agora)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setScheduleType('scheduled')}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold border flex items-center justify-center gap-1.5 ${
-                  scheduleType === 'scheduled'
-                    ? 'bg-purple-50 text-purple-900 border-purple-300'
-                    : 'bg-white text-stone-600 border-stone-200'
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Agendar Horário</span>
-              </button>
-            </div>
-
-            {scheduleType === 'scheduled' && (
-              <div className="pt-1">
-                <input
-                  type="datetime-local"
-                  value={scheduledForInput}
-                  onChange={(e) => setScheduledForInput(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 rounded-xl bg-purple-50/50 border border-purple-200 text-xs font-semibold text-stone-900"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* 4. Identificação do Cliente + Busca por Telefone/Histórico */}
-          <div className="space-y-2.5 pt-2 border-t border-stone-100">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-black uppercase tracking-wider text-stone-600 flex items-center gap-1">
-                <User className="w-3.5 h-3.5" />
-                <span>4. Dados do Cliente</span>
-              </label>
-              {orderChannel === 'counter' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCustomerName(`Balcão #${Math.floor(10 + Math.random() * 89)}`);
-                    setCustomerPhone('');
-                  }}
-                  className="text-[11px] font-bold text-amber-700 hover:underline flex items-center gap-1"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  Gerar Senha Rápida de Balcão
-                </button>
+          {/* Card Cliente + Endereço */}
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-stone-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-black uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
+                <User className="w-4 h-4 text-emerald-600" />
+                Cliente & Atendimento
+              </span>
+              {isSearchingCustomer && (
+                <span className="text-[11px] text-stone-400">Buscando histórico...</span>
               )}
             </div>
 
-            {/* Busca de Cliente Recorrente por Telefone ou Nome */}
+            {/* Busca de cliente recorrente */}
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-2.5" />
+              <label htmlFor="pos-customer-search" className="sr-only">
+                Buscar cliente recorrente por telefone ou nome
+              </label>
+              <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
+                id="pos-customer-search"
                 type="text"
                 value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                placeholder="Buscar cliente recorrente por telefone ou nome (auto-preenche endereço)..."
-                className="w-full pl-8 pr-3 py-2 rounded-xl bg-amber-50/60 border border-amber-200 text-xs text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCustomerSearch(val);
+                  if (val.trim().length < 3) {
+                    setCustomerSuggestions([]);
+                    setIsSearchingCustomer(false);
+                  }
+                }}
+                placeholder="Buscar cliente recorrente por WhatsApp ou nome..."
+                className="w-full min-h-[38px] pl-9 pr-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
-              {isSearchingCustomer && (
-                <span className="text-[10px] text-stone-400 absolute right-3 top-2.5">
-                  Buscando...
-                </span>
-              )}
 
               {customerSuggestions.length > 0 && (
-                <div className="absolute z-20 left-0 right-0 mt-1 bg-white rounded-xl border border-stone-200 shadow-lg max-h-52 overflow-y-auto divide-y divide-stone-100">
-                  {customerSuggestions.map((sug, i) => (
+                <div className="absolute z-20 left-0 right-0 mt-1 bg-white rounded-xl border border-stone-200 shadow-xl divide-y divide-stone-100 max-h-56 overflow-y-auto">
+                  {customerSuggestions.map((c, idx) => (
                     <button
-                      key={i}
+                      key={`${c.customerPhone}-${idx}`}
                       type="button"
-                      onClick={() => handleSelectRecurringCustomer(sug)}
-                      className="w-full text-left px-3.5 py-2.5 hover:bg-amber-50 transition-colors text-xs flex items-center justify-between"
+                      onClick={() => handleSelectRecurringCustomer(c)}
+                      className="w-full px-3.5 py-2.5 text-left hover:bg-emerald-50/60 flex items-center justify-between gap-2 transition-colors"
                     >
                       <div>
-                        <div className="font-bold text-stone-900">{sug.customerName}</div>
-                        <div className="text-[11px] text-stone-500">
-                          Tel: {sug.customerPhone}
-                          {sug.lastAddress
-                            ? ` • ${sug.lastAddress.street}, ${sug.lastAddress.number} (${sug.lastAddress.neighborhood})`
+                        <span className="font-bold text-xs text-stone-900 block">
+                          {c.customerName}
+                        </span>
+                        <span className="text-[11px] text-stone-500">
+                          {c.customerPhone}
+                          {c.lastAddress
+                            ? ` • ${c.lastAddress.street}, ${c.lastAddress.number} (${c.lastAddress.neighborhood})`
                             : ''}
-                        </div>
+                        </span>
                       </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700">
-                        {sug.orderCount} pedido(s)
+                      <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full shrink-0">
+                        {c.orderCount} pedido(s)
                       </span>
                     </button>
                   ))}
@@ -1065,182 +924,289 @@ export default function QuickOrderPosPage() {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold text-stone-600 mb-0.5">
-                  Nome / Identificação *
+                <label htmlFor="pos-customer-name" className="block text-xs font-bold text-stone-600 mb-1">
+                  Nome do Cliente *
                 </label>
                 <input
+                  id="pos-customer-name"
                   type="text"
                   required
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Ex: Maria Silva ou Mesa 04"
-                  className="w-full px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-900"
+                  placeholder="Ex: Maria Oliveira"
+                  className="w-full min-h-[38px] px-3 py-2 rounded-xl border border-stone-200 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900"
                 />
               </div>
+
               <div>
-                <label className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                <label htmlFor="pos-customer-phone" className="block text-xs font-bold text-stone-600 mb-1">
                   WhatsApp / Telefone{' '}
-                  {orderChannel === 'counter' && fulfillmentType !== 'delivery'
-                    ? '(Opcional no Balcão)'
-                    : '*'}
+                  {orderChannel !== 'counter' || fulfillmentType === 'delivery' ? '*' : '(Opcional)'}
                 </label>
                 <input
-                  type="tel"
-                  required={orderChannel !== 'counter' || fulfillmentType === 'delivery'}
+                  id="pos-customer-phone"
+                  type="text"
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
-                  placeholder="(11) 99999-9999"
-                  className="w-full px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-900"
+                  placeholder="(75) 99999-9999"
+                  className="w-full min-h-[38px] px-3 py-2 rounded-xl border border-stone-200 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900"
                 />
               </div>
             </div>
 
-            {/* Endereço de Entrega quando fulfillmentType === 'delivery' */}
+            {/* Endereço de Entrega (Exibido quando Entrega) */}
             {fulfillmentType === 'delivery' && (
-              <div className="p-3 rounded-xl bg-blue-50/50 border border-blue-200/80 space-y-2">
-                <div className="text-[11px] font-black uppercase text-blue-900 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5" />
-                  <span>Endereço de Entrega</span>
+              <div className="pt-3 border-t border-stone-100 space-y-2.5 bg-blue-50/40 p-3 rounded-xl border border-blue-100">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                    Endereço de Entrega
+                  </span>
+                  <span className="text-[11px] text-blue-700 font-medium">
+                    CEP opcional no WhatsApp/Telefone
+                  </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={zipCode}
-                    onChange={(e) => setZipCode(e.target.value)}
-                    placeholder="CEP (01310-100)"
-                    required
-                    className="col-span-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                  />
-                  <input
-                    type="text"
-                    value={street}
-                    onChange={(e) => setStreet(e.target.value)}
-                    placeholder="Rua / Logradouro *"
-                    required
-                    className="col-span-2 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                  />
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <div className="sm:col-span-4">
+                    <label htmlFor="pos-zip" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      CEP (Opcional)
+                    </label>
+                    <input
+                      id="pos-zip"
+                      type="text"
+                      value={zipCode}
+                      onChange={(e) => setZipCode(e.target.value)}
+                      placeholder="44000-000"
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-8">
+                    <label htmlFor="pos-street" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      Rua / Logradouro *
+                    </label>
+                    <input
+                      id="pos-street"
+                      type="text"
+                      required
+                      value={street}
+                      onChange={(e) => setStreet(e.target.value)}
+                      placeholder="Av. Getúlio Vargas"
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
+                    <label htmlFor="pos-number" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      Número (ou S/N) *
+                    </label>
+                    <input
+                      id="pos-number"
+                      type="text"
+                      required
+                      value={number}
+                      onChange={(e) => setNumber(e.target.value)}
+                      placeholder="120"
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-8">
+                    <label htmlFor="pos-complement" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      Complemento
+                    </label>
+                    <input
+                      id="pos-complement"
+                      type="text"
+                      value={complement}
+                      onChange={(e) => setComplement(e.target.value)}
+                      placeholder="Apto / Bloco / Casa"
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-5">
+                    <label htmlFor="pos-neighborhood" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      Bairro *
+                    </label>
+                    <input
+                      id="pos-neighborhood"
+                      type="text"
+                      required
+                      value={neighborhood}
+                      onChange={(e) => setNeighborhood(e.target.value)}
+                      placeholder="Kalilândia"
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-5">
+                    <label htmlFor="pos-city" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      Cidade *
+                    </label>
+                    <input
+                      id="pos-city"
+                      type="text"
+                      required
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label htmlFor="pos-uf" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      UF *
+                    </label>
+                    <input
+                      id="pos-uf"
+                      type="text"
+                      required
+                      maxLength={2}
+                      value={stateUf}
+                      onChange={(e) => setStateUf(e.target.value.toUpperCase())}
+                      className="w-full min-h-[36px] px-2 py-1.5 rounded-lg border border-stone-200 bg-white text-xs uppercase text-center"
+                    />
+                  </div>
+                  <div className="sm:col-span-12">
+                    <label htmlFor="pos-ref" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
+                      Ponto de Referência
+                    </label>
+                    <input
+                      id="pos-ref"
+                      type="text"
+                      value={reference}
+                      onChange={(e) => setReference(e.target.value)}
+                      placeholder="Próximo a..."
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
+                    />
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={number}
-                    onChange={(e) => setNumber(e.target.value)}
-                    placeholder="Número *"
-                    required
-                    className="col-span-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                  />
-                  <input
-                    type="text"
-                    value={complement}
-                    onChange={(e) => setComplement(e.target.value)}
-                    placeholder="Apto / Bloco"
-                    className="col-span-2 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={neighborhood}
-                    onChange={(e) => setNeighborhood(e.target.value)}
-                    placeholder="Bairro *"
-                    required
-                    className="col-span-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                  />
-                  <input
-                    type="text"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    placeholder="Cidade *"
-                    required
-                    className="col-span-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                  />
-                  <input
-                    type="text"
-                    maxLength={2}
-                    value={stateUf}
-                    onChange={(e) => setStateUf(e.target.value.toUpperCase())}
-                    placeholder="UF *"
-                    required
-                    className="col-span-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs uppercase"
-                  />
-                </div>
-                <input
-                  type="text"
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value)}
-                  placeholder="Ponto de referência / instruções para entrega"
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 text-xs"
-                />
               </div>
             )}
+
+            {/* Horário: Imediato vs Agendado */}
+            <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScheduleType('asap')}
+                  aria-pressed={scheduleType === 'asap'}
+                  className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border ${
+                    scheduleType === 'asap'
+                      ? 'bg-stone-900 text-white border-stone-900'
+                      : 'bg-stone-50 text-stone-700 border-stone-200'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Imediato (ASAP)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScheduleType('scheduled')}
+                  aria-pressed={scheduleType === 'scheduled'}
+                  className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border ${
+                    scheduleType === 'scheduled'
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'bg-stone-50 text-stone-700 border-stone-200'
+                  }`}
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Agendado</span>
+                </button>
+              </div>
+
+              {scheduleType === 'scheduled' && (
+                <input
+                  type="datetime-local"
+                  required
+                  value={scheduledForInput}
+                  onChange={(e) => setScheduledForInput(e.target.value)}
+                  aria-label="Data e hora do agendamento"
+                  className="min-h-[36px] px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50/40 text-xs text-stone-900"
+                />
+              )}
+            </div>
           </div>
 
-          {/* 5. Itens na Sacola & Observações para a Cozinha */}
-          <div className="space-y-2.5 pt-2 border-t border-stone-100">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-black uppercase tracking-wider text-stone-600">
-                5. Itens do Pedido ({cart.reduce((s, i) => s + i.quantity, 0)})
-              </label>
+          {/* Card Sacola + Pagamento + Totais */}
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-stone-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div>
+                <h2 className="text-sm font-black uppercase tracking-wider text-stone-900">
+                  Sacola do Pedido
+                </h2>
+                <p className="text-xs text-stone-500">
+                  {totalItemsCount} unidade(s) selecionada(s)
+                </p>
+              </div>
               {cart.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setCart([])}
-                  className="text-[11px] text-red-600 hover:underline font-semibold"
+                  className="text-xs font-bold text-red-600 hover:underline"
                 >
-                  Limpar itens
+                  Limpar sacola
                 </button>
               )}
             </div>
 
+            {/* Itens da Sacola */}
             {cart.length === 0 ? (
-              <div className="py-6 text-center rounded-xl bg-stone-50 border border-dashed border-stone-200 text-xs text-stone-400">
-                Clique em &ldquo;+ Adicionar&rdquo; nos produtos à esquerda para montar o pedido.
+              <div className="py-8 text-center border-2 border-dashed border-stone-200 rounded-xl text-stone-400 text-xs">
+                Selecione os pratos ao lado para montar o pedido
               </div>
             ) : (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 {cart.map((item) => (
                   <div
-                    key={item.variantId}
-                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200/80 text-xs"
+                    key={item.cartItemKey}
+                    className="p-2.5 rounded-xl bg-stone-50 border border-stone-200/80 flex items-center justify-between gap-2"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="font-bold text-stone-900 truncate">
-                        {item.productName}{' '}
-                        <span className="font-normal text-stone-500">({item.variantName})</span>
-                      </div>
-                      <div className="text-[11px] text-stone-500 font-mono">
-                        {formatBrl(item.unitPriceInCents)} un. • Subtotal:{' '}
-                        <strong className="text-stone-800">
-                          {formatBrl(item.unitPriceInCents * item.quantity)}
-                        </strong>
-                      </div>
+                      <span className="font-bold text-xs text-stone-900 block truncate">
+                        {item.productName}
+                      </span>
+                      <span className="text-[11px] text-stone-500 block">
+                        {item.variantName} • {formatBrl(item.unitPriceInCents)} un.
+                      </span>
+                      {item.modifierSummary && (
+                        <span className="text-[11px] font-semibold text-emerald-800 block">
+                          + {item.modifierSummary}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
-                        onClick={() => handleUpdateQuantity(item.variantId, -1)}
-                        className="w-6 h-6 rounded bg-white border border-stone-200 flex items-center justify-center hover:bg-stone-100"
+                        onClick={() => handleUpdateQuantity(item.cartItemKey, -1)}
+                        aria-label={`Diminuir quantidade de ${item.productName}`}
+                        className="w-8 h-8 rounded-lg bg-white border border-stone-200 flex items-center justify-center text-stone-700 hover:bg-stone-100"
                       >
-                        <Minus className="w-3 h-3" />
+                        <Minus className="w-3.5 h-3.5" />
                       </button>
-                      <span className="w-6 text-center font-mono font-bold">{item.quantity}</span>
+                      <span className="w-6 text-center text-xs font-black text-stone-900">
+                        {item.quantity}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => handleUpdateQuantity(item.variantId, 1)}
-                        className="w-6 h-6 rounded bg-white border border-stone-200 flex items-center justify-center hover:bg-stone-100"
+                        onClick={() => handleUpdateQuantity(item.cartItemKey, 1)}
+                        disabled={item.quantity >= 99}
+                        aria-label={`Aumentar quantidade de ${item.productName}`}
+                        className="w-8 h-8 rounded-lg bg-white border border-stone-200 flex items-center justify-center text-stone-700 hover:bg-stone-100 disabled:opacity-40"
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-3.5 h-3.5" />
                       </button>
+
+                      <span className="w-20 text-right font-mono font-bold text-xs text-stone-900">
+                        {formatBrl(item.unitPriceInCents * item.quantity)}
+                      </span>
+
                       <button
                         type="button"
-                        onClick={() => handleRemoveItem(item.variantId)}
-                        className="p-1 text-stone-400 hover:text-red-600"
-                        aria-label="Remover item"
+                        onClick={() => handleRemoveItem(item.cartItemKey)}
+                        aria-label={`Remover ${item.productName} da sacola`}
+                        className="p-1.5 text-stone-400 hover:text-red-600"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -1248,181 +1214,244 @@ export default function QuickOrderPosPage() {
               </div>
             )}
 
-            {/* Observações para a Cozinha */}
-            <div className="space-y-1.5 pt-1">
-              <label className="block text-[11px] font-bold text-stone-700">
-                Observações para a Cozinha / Expedição
+            {/* Observações Gerais da Cozinha / Expedição */}
+            <div className="space-y-1.5 pt-2 border-t border-stone-100">
+              <label htmlFor="pos-kitchen-notes" className="block text-xs font-bold uppercase text-stone-500">
+                Observações do Pedido (Cozinha / Expedição)
               </label>
-              <textarea
-                rows={2}
-                value={kitchenNotes}
-                onChange={(e) => setKitchenNotes(e.target.value)}
-                placeholder="Ex: Sem cebola, ponto da carne, enviar talheres..."
-                className="w-full px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-900"
-              />
-              <div className="flex items-center gap-1 flex-wrap">
-                {QUICK_KITCHEN_NOTES.map((tag) => (
+              <div className="flex flex-wrap gap-1">
+                {QUICK_KITCHEN_NOTES.map((note) => (
                   <button
-                    key={tag}
+                    key={note}
                     type="button"
-                    onClick={() => handleAppendQuickNote(tag)}
-                    className="px-2 py-0.5 rounded-md bg-stone-100 hover:bg-amber-100 text-stone-700 hover:text-amber-900 text-[10px] font-semibold transition-colors"
+                    onClick={() => handleAppendQuickNote(note)}
+                    className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-stone-100 hover:bg-amber-100 text-stone-700 hover:text-amber-900 transition-colors"
                   >
-                    + {tag}
+                    + {note}
                   </button>
                 ))}
               </div>
-            </div>
-          </div>
-
-          {/* 6. Pagamento, Troco e Desconto Autorizado */}
-          <div className="space-y-3 pt-2 border-t border-stone-100">
-            <label className="block text-xs font-black uppercase tracking-wider text-stone-600">
-              6. Forma de Pagamento & Condição Financeira
-            </label>
-
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { id: 'pix', label: 'Pix (QR / Copia e Cola)', icon: QrCode },
-                { id: 'cash', label: 'Dinheiro', icon: Banknote },
-                { id: 'card_on_delivery', label: 'Cartão na Entrega', icon: CreditCard },
-                { id: 'pos_card', label: 'Maquininha POS (Balcão)', icon: CreditCard },
-              ].map((pm) => {
-                const Icon = pm.icon;
-                const active = paymentMethod === pm.id;
-                return (
-                  <button
-                    key={pm.id}
-                    type="button"
-                    onClick={() => {
-                      setPaymentMethod(pm.id as OrderPaymentMethod);
-                      if (pm.id === 'pix' || pm.id === 'card_on_delivery') {
-                        setMarkAsPaidNow(false);
-                      }
-                    }}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
-                      active
-                        ? 'bg-stone-900 text-white border-stone-900'
-                        : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{pm.label}</span>
-                  </button>
-                );
-              })}
+              <textarea
+                id="pos-kitchen-notes"
+                rows={2}
+                value={kitchenNotes}
+                onChange={(e) => setKitchenNotes(e.target.value)}
+                placeholder="Observações gerais do pedido..."
+                className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900"
+              />
             </div>
 
-            {/* Campo de Troco quando Dinheiro */}
-            {paymentMethod === 'cash' && (
-              <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-emerald-950">Troco para quanto? (R$)</span>
-                  {cashChangeReturnCents !== null && (
-                    <span className="font-black text-emerald-700">
-                      Troco a devolver: {formatBrl(cashChangeReturnCents)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={cashChangeReais}
-                    onChange={(e) => setCashChangeReais(e.target.value)}
-                    placeholder="Ex: 100,00 (vazio = não precisa de troco)"
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-xs font-mono"
-                  />
-                  {[50, 100, 200].map((bill) => (
+            {/* Forma de Pagamento */}
+            <div className="space-y-2.5 pt-2 border-t border-stone-100">
+              <span className="block text-xs font-black uppercase text-stone-500">
+                Forma de Pagamento
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {(
+                  [
+                    { id: 'pix', label: 'Pix QR', icon: QrCode },
+                    { id: 'cash', label: 'Dinheiro', icon: Banknote },
+                    { id: 'card_on_delivery', label: 'Cartão Entrega', icon: CreditCard },
+                    { id: 'pos_card', label: 'Maquininha Balcão', icon: CreditCard },
+                  ] as const
+                ).map((pm) => {
+                  const Icon = pm.icon;
+                  return (
                     <button
-                      key={bill}
+                      key={pm.id}
                       type="button"
-                      onClick={() => setCashChangeReais(String(bill))}
-                      className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-emerald-100 border border-emerald-300 text-xs font-bold text-emerald-900"
+                      onClick={() => setPaymentMethod(pm.id)}
+                      aria-pressed={paymentMethod === pm.id}
+                      className={`min-h-[38px] py-2 px-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all ${
+                        paymentMethod === pm.id
+                          ? 'bg-stone-900 text-white border-stone-900'
+                          : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                      }`}
                     >
-                      R$ {bill}
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{pm.label}</span>
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-            )}
 
-            {/* Checkbox de Pagamento já recebido no balcão (apenas para Dinheiro ou Maquininha POS) */}
-            {(paymentMethod === 'cash' || paymentMethod === 'pos_card') && (
-              <label className="flex items-center gap-2 p-2.5 rounded-xl bg-stone-50 border border-stone-200 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={markAsPaidNow}
-                  onChange={(e) => setMarkAsPaidNow(e.target.checked)}
-                  className="rounded border-stone-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span className="font-semibold text-stone-800">
-                  Pagamento já recebido presencialmente no balcão (marcar como <strong>Pago</strong>)
-                </span>
-              </label>
-            )}
-
-            {/* Desconto e Entrada Direta no KDS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              <div>
-                <label className="block text-[11px] font-semibold text-stone-600 mb-0.5">
-                  Desconto Comercial (R$){' '}
-                  {operatorRole !== 'tenant_admin' && (
-                    <span className="text-[10px] text-stone-400">(Máx. 20%)</span>
+              {paymentMethod === 'cash' && (
+                <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor="pos-cash-change" className="text-xs font-bold text-amber-900">
+                      Troco para quanto? (R$)
+                    </label>
+                    <input
+                      id="pos-cash-change"
+                      type="text"
+                      value={cashChangeReais}
+                      onChange={(e) => setCashChangeReais(e.target.value)}
+                      placeholder="Ex: 100,00"
+                      className="w-28 min-h-[36px] px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-xs text-right font-mono font-bold"
+                    />
+                  </div>
+                  {cashChangeReturnCents !== null && (
+                    <div className="text-xs font-black text-emerald-800 flex items-center justify-between pt-1 border-t border-amber-200/60">
+                      <span>Troco a devolver:</span>
+                      <span className="font-mono">{formatBrl(cashChangeReturnCents)}</span>
+                    </div>
                   )}
-                </label>
-                <input
-                  type="text"
-                  value={discountReais}
-                  onChange={(e) => setDiscountReais(e.target.value)}
-                  placeholder="0,00"
-                  className="w-full px-3 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono"
-                />
-              </div>
+                </div>
+              )}
 
-              <div className="flex flex-col justify-end">
-                <label className="flex items-center gap-2 p-2 rounded-xl bg-amber-50/70 border border-amber-200 text-xs cursor-pointer">
+              {(paymentMethod === 'cash' ||
+                paymentMethod === 'pos_card' ||
+                paymentMethod === 'credit_card') && (
+                <label className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={confirmImmediately}
-                    onChange={(e) => setConfirmImmediately(e.target.checked)}
-                    className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                    checked={markAsPaidNow}
+                    onChange={(e) => setMarkAsPaidNow(e.target.checked)}
+                    className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
                   />
-                  <span className="font-bold text-amber-950">
-                    Enviar direto ao KDS (Confirmado)
+                  <span className="text-xs font-bold text-emerald-900">
+                    Já recebido presencialmente no balcão (Marcar como Pago)
                   </span>
                 </label>
-              </div>
+              )}
             </div>
-          </div>
 
-          {/* Resumo de Totais e Botão de Finalização */}
-          <div className="p-4 rounded-2xl bg-stone-900 text-white space-y-3">
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between text-stone-300">
-                <span>Subtotal dos Itens:</span>
-                <span className="font-mono">{formatBrl(subtotalCents)}</span>
+            {/* Taxa de Entrega editável quando Entrega */}
+            {fulfillmentType === 'delivery' && (
+              <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-200 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="pos-delivery-fee" className="text-xs font-bold text-blue-900">
+                    Taxa de Entrega (R$)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      id="pos-delivery-fee"
+                      type="text"
+                      value={
+                        deliveryFeeManuallyEdited
+                          ? deliveryFeeReais
+                          : (defaultDeliveryFeeCents / 100).toFixed(2).replace('.', ',')
+                      }
+                      onChange={(e) => {
+                        setDeliveryFeeManuallyEdited(true);
+                        setDeliveryFeeReais(e.target.value);
+                      }}
+                      placeholder="0,00"
+                      className="w-24 min-h-[36px] px-2.5 py-1 rounded-lg border border-blue-300 bg-white text-xs text-right font-mono font-bold text-stone-900"
+                    />
+                    {deliveryFeeManuallyEdited && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeliveryFeeManuallyEdited(false);
+                          setDeliveryFeeReais('');
+                        }}
+                        className="text-[11px] font-bold text-blue-700 hover:underline"
+                      >
+                        Padrão
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Opções Secundárias Recolhíveis (Desconto, Nº do Pedido, E-mail) */}
+            <div className="border border-stone-200 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedOptions((prev) => !prev)}
+                className="w-full min-h-[38px] px-3.5 py-2 bg-stone-50 hover:bg-stone-100 flex items-center justify-between text-xs font-bold text-stone-700"
+              >
+                <span>Opções avançadas (Desconto, Nº manual do pedido, E-mail)</span>
+                {showAdvancedOptions ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </button>
+
+              {showAdvancedOptions && (
+                <div className="p-3.5 space-y-3 bg-white border-t border-stone-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="pos-discount" className="block text-xs font-bold text-stone-600 mb-1">
+                        Desconto (R$){' '}
+                        {operatorRole !== 'tenant_admin' && (
+                          <span className="text-[10px] text-amber-700">(Máx. 20%)</span>
+                        )}
+                      </label>
+                      <input
+                        id="pos-discount"
+                        type="text"
+                        value={discountReais}
+                        onChange={(e) => setDiscountReais(e.target.value)}
+                        placeholder="0,00"
+                        className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="pos-order-number" className="block text-xs font-bold text-stone-600 mb-1">
+                        Nº do Pedido (Opcional)
+                      </label>
+                      <input
+                        id="pos-order-number"
+                        type="text"
+                        value={orderNumberOverride}
+                        onChange={(e) => setOrderNumberOverride(e.target.value)}
+                        placeholder="Automático (ex: #1050)"
+                        className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="pos-email" className="block text-xs font-bold text-stone-600 mb-1">
+                      E-mail do Cliente (Opcional)
+                    </label>
+                    <input
+                      id="pos-email"
+                      type="email"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      placeholder="cliente@email.com"
+                      className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Resumo Financeiro */}
+            <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5 text-xs">
+              <div className="flex justify-between text-stone-600">
+                <span>Subtotal ({totalItemsCount} un.):</span>
+                <span className="font-mono font-semibold">{formatBrl(subtotalCents)}</span>
               </div>
               {fulfillmentType === 'delivery' && (
-                <div className="flex justify-between text-stone-300">
+                <div className="flex justify-between text-stone-600">
                   <span>Taxa de Entrega:</span>
-                  <span className="font-mono">{formatBrl(deliveryFeeCents)}</span>
+                  <span className="font-mono font-semibold">{formatBrl(deliveryFeeCents)}</span>
                 </div>
               )}
               {discountCents > 0 && (
-                <div className="flex justify-between text-amber-400 font-semibold">
-                  <span>Desconto Aplicado:</span>
-                  <span className="font-mono">-{formatBrl(discountCents)}</span>
+                <div className="flex justify-between text-emerald-700 font-semibold">
+                  <span>Desconto:</span>
+                  <span className="font-mono">- {formatBrl(discountCents)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-base font-black pt-1.5 border-t border-stone-700">
-                <span>TOTAL DO PEDIDO:</span>
-                <span className="font-mono text-emerald-400 text-lg">{formatBrl(totalCents)}</span>
+              <div className="pt-2 border-t border-stone-200 flex justify-between items-baseline">
+                <span className="font-black text-stone-900 text-sm">Total do Pedido:</span>
+                <span className="font-black font-mono text-lg text-stone-900">
+                  {formatBrl(totalCents)}
+                </span>
               </div>
             </div>
 
             {submitError && (
-              <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-400 text-red-100 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-300" />
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <span>{submitError}</span>
               </div>
             )}
@@ -1430,22 +1459,87 @@ export default function QuickOrderPosPage() {
             <button
               type="submit"
               disabled={cart.length === 0 || isSubmitting}
-              className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-stone-950 font-heading font-black text-sm flex items-center justify-center gap-2 transition-all shadow-md"
+              className="w-full min-h-[46px] py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-stone-300 text-white font-black text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-[0.99]"
             >
-              <Zap className="w-4 h-4" />
-              <span>
-                {isSubmitting
-                  ? 'Registrando Pedido no KDS...'
-                  : confirmImmediately
-                  ? `Registrar Pedido & Enviar ao KDS (${formatBrl(totalCents)})`
-                  : `Registrar Pedido como Pendente (${formatBrl(totalCents)})`}
-              </span>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Revisar e Registrar Pedido ({formatBrl(totalCents)})</span>
             </button>
           </div>
-        </form>
-      </div>
+        </div>
+      </form>
 
-      {/* Modal de Impressão Térmica 58mm / 80mm */}
+      {/* Barra Persistente Mobile quando na aba Catálogo com itens */}
+      {mobileTab === 'catalog' && cart.length > 0 && (
+        <div className="fixed bottom-4 left-4 right-4 z-30 xl:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileTab('checkout')}
+            className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-emerald-600 text-white font-black text-xs shadow-xl flex items-center justify-between"
+          >
+            <span className="flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4" />
+              <span>Ver Sacola ({totalItemsCount} itens)</span>
+            </span>
+            <span className="font-mono text-sm">{formatBrl(totalCents)} →</span>
+          </button>
+        </div>
+      )}
+
+      {/* Modal de Seleção de Complementos */}
+      {pendingModifierSelection && (
+        <QuickOrderModifierModal
+          product={pendingModifierSelection.product}
+          variant={pendingModifierSelection.variant}
+          onClose={() => setPendingModifierSelection(null)}
+          onConfirm={(modPayload) => {
+            appendCartItem(
+              pendingModifierSelection.product,
+              pendingModifierSelection.variant,
+              modPayload
+            );
+            setPendingModifierSelection(null);
+          }}
+        />
+      )}
+
+      {/* Modal de Conferência Final antes de Enviar à Cozinha/KDS */}
+      {isReviewOpen && (
+        <QuickOrderReviewModal
+          orderChannel={orderChannel}
+          fulfillmentType={fulfillmentType}
+          scheduleType={scheduleType}
+          scheduledForInput={scheduledForInput}
+          customerName={customerName}
+          customerPhone={customerPhone}
+          address={{
+            zipCode,
+            street,
+            number,
+            complement,
+            neighborhood,
+            city,
+            stateUf,
+            reference,
+          }}
+          cart={cart}
+          kitchenNotes={kitchenNotes}
+          subtotalCents={subtotalCents}
+          deliveryFeeCents={deliveryFeeCents}
+          discountCents={discountCents}
+          totalCents={totalCents}
+          paymentMethod={paymentMethod}
+          markAsPaidNow={markAsPaidNow}
+          cashChangeForCents={cashChangeForCents}
+          cashChangeReturnCents={cashChangeReturnCents}
+          confirmImmediately={confirmImmediately}
+          onToggleConfirmImmediately={setConfirmImmediately}
+          isSubmitting={isSubmitting}
+          onClose={() => setIsReviewOpen(false)}
+          onConfirmSubmit={handleConfirmAndSubmitOrder}
+        />
+      )}
+
+      {/* Modal de Impressão Térmica */}
       <OrderPrintModal
         order={printModalOrder}
         tenantName={tenantName}
@@ -1455,4 +1549,3 @@ export default function QuickOrderPosPage() {
     </div>
   );
 }
-

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { X, ShoppingBag, Plus, Minus, Trash2, ArrowRight } from 'lucide-react';
 import { useCart, formatBrl } from '@/modules/cart/CartContext';
+import { resolveCartItemKey } from '@/modules/cart/cart.utils';
 import { Button } from '@/components/ui/Button';
 
 export function CartDrawer() {
@@ -121,9 +122,11 @@ export function CartDrawer() {
               </div>
             ) : (
               <div className="space-y-4">
-                {items.map((item) => (
+                {items.map((item) => {
+                  const itemKey = resolveCartItemKey(item);
+                  return (
                   <div
-                    key={item.variantId}
+                    key={itemKey}
                     className="p-4 rounded-tenant bg-tenant-background border border-tenant-border/60 flex gap-4 transition-all"
                   >
                     {/* Imagem do Produto */}
@@ -151,7 +154,7 @@ export function CartDrawer() {
                             {item.productName}
                           </h4>
                           <button
-                            onClick={() => removeItem(item.variantId)}
+                            onClick={() => removeItem(itemKey)}
                             className="text-stone-400 hover:text-red-600 transition-colors p-0.5"
                             title="Remover item"
                           >
@@ -166,13 +169,23 @@ export function CartDrawer() {
                             {formatBrl(item.unitPriceInCents)}
                           </span>
                         </div>
+                        {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {item.selectedModifiers.map((mod) => (
+                              <li key={`${mod.groupId}-${mod.optionId}`} className="text-[11px] text-tenant-muted">
+                                + {mod.optionName}
+                                {mod.priceInCents > 0 ? ` (${formatBrl(mod.priceInCents)})` : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between pt-2 mt-1 border-t border-tenant-border/40">
                         {/* Controles de Quantidade */}
                         <div className="flex items-center gap-2 bg-tenant-surface border border-tenant-border rounded-lg px-2 py-1">
                           <button
-                            onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
+                            onClick={() => updateQuantity(itemKey, item.quantity - 1)}
                             className="text-tenant-text hover:text-tenant-primary transition-colors p-0.5"
                             aria-label="Diminuir quantidade"
                           >
@@ -182,7 +195,7 @@ export function CartDrawer() {
                             {item.quantity}
                           </span>
                           <button
-                            onClick={() => updateQuantity(item.variantId, item.quantity + 1)}
+                            onClick={() => updateQuantity(itemKey, item.quantity + 1)}
                             className="text-tenant-text hover:text-tenant-primary transition-colors p-0.5"
                             aria-label="Aumentar quantidade"
                           >
@@ -197,7 +210,8 @@ export function CartDrawer() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 <div className="flex justify-end pt-1">
                   <button

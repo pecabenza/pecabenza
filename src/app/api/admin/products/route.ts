@@ -9,6 +9,7 @@ import {
   resolveOrCreateCoverMediaId,
   hydrateProductsWithCoverUrls,
 } from '@/modules/catalog/media-helper';
+import { normalizeCompareAtPriceCents } from '@/modules/catalog/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,26 @@ const VariantSchema = z.object({
   unit_type: z.enum(['ml', 'l', 'g', 'kg', 'un', 'cx', 'portion', 'other']).default('ml'),
   unit_value: z.number().positive(),
   price_in_cents: z.number().int().nonnegative(),
+  compare_at_price_cents: z.number().int().nonnegative().nullable().optional(),
   is_available: z.boolean().default(true),
+});
+
+const ModifierOptionSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1).max(120),
+  price_in_cents: z.number().int().nonnegative().default(0),
+  is_available: z.boolean().default(true),
+  display_order: z.number().int().min(0).optional(),
+});
+
+const ModifierGroupSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1).max(120),
+  is_required: z.boolean().default(false),
+  min_selections: z.number().int().min(0).default(0),
+  max_selections: z.number().int().min(1).default(1),
+  display_order: z.number().int().min(0).optional(),
+  options: z.array(ModifierOptionSchema).default([]),
 });
 
 const ProductSaveSchema = z.object({
@@ -41,6 +61,8 @@ const ProductSaveSchema = z.object({
   after_thawing_instructions: z.string().nullable().optional(),
   conservation_instructions: z.string().nullable().optional(),
   preparation_instructions: z.string().nullable().optional(),
+  modifier_groups: z.array(ModifierGroupSchema).optional(),
+  suggested_product_ids: z.array(z.string().uuid()).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -58,6 +80,7 @@ export async function GET(request: NextRequest) {
         .from('products')
         .select('*, variants:product_variants(*), information:product_information(*), category:product_categories(*)')
         .eq('tenant_id', tenant.id)
+        .neq('status', 'archived')
         .order('created_at', { ascending: false }),
       adminClient
         .from('product_categories')
@@ -72,10 +95,50 @@ export async function GET(request: NextRequest) {
       productsRes.data || []
     );
 
+    const groupsByProduct = new Map<string, any[]>();
+    const suggestionsByProduct = new Map<string, string[]>();
+    try {
+      const [groupsRes, suggRes] = await Promise.all([
+        adminClient
+          .from('product_modifier_groups')
+          .select('*, options:product_modifier_options(*)')
+          .eq('tenant_id', tenant.id)
+          .order('display_order', { ascending: true }),
+        adminClient
+          .from('product_suggestions')
+          .select('product_id, suggested_product_id, display_order')
+          .eq('tenant_id', tenant.id)
+          .order('display_order', { ascending: true }),
+      ]);
+
+      for (const g of groupsRes.data || []) {
+        const sortedOptions = (g.options || []).sort(
+          (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0)
+        );
+        const list = groupsByProduct.get(g.product_id) || [];
+        list.push({ ...g, options: sortedOptions });
+        groupsByProduct.set(g.product_id, list);
+      }
+
+      for (const s of suggRes.data || []) {
+        const list = suggestionsByProduct.get(s.product_id) || [];
+        list.push(s.suggested_product_id);
+        suggestionsByProduct.set(s.product_id, list);
+      }
+    } catch {
+      // Tabelas opcionais antes da migration 00017
+    }
+
+    const enrichedProducts = hydratedProducts.map((p: any) => ({
+      ...p,
+      modifier_groups: groupsByProduct.get(p.id) || [],
+      suggested_product_ids: suggestionsByProduct.get(p.id) || [],
+    }));
+
     return NextResponse.json({
       success: true,
       tenantId: tenant.id,
-      products: hydratedProducts,
+      products: enrichedProducts,
       categories: categoriesRes.data || [],
     });
   } catch (error) {
@@ -261,6 +324,11 @@ export async function POST(request: NextRequest) {
     // Inserir / Atualizar variantes enviadas
     for (let i = 0; i < validated.variants.length; i++) {
       const v = validated.variants[i];
+      const compareAtPriceCents = normalizeCompareAtPriceCents(
+        v.price_in_cents,
+        v.compare_at_price_cents
+      );
+
       if (v.id && !v.id.startsWith('v-temp-') && existingVariantIds.includes(v.id)) {
         await adminClient
           .from('product_variants')
@@ -269,6 +337,7 @@ export async function POST(request: NextRequest) {
             unit_type: v.unit_type,
             unit_value: v.unit_value,
             price_in_cents: v.price_in_cents,
+            compare_at_price_cents: compareAtPriceCents,
             is_available: v.is_available,
             display_order: i + 1,
           })
@@ -282,9 +351,75 @@ export async function POST(request: NextRequest) {
           unit_type: v.unit_type,
           unit_value: v.unit_value,
           price_in_cents: v.price_in_cents,
+          compare_at_price_cents: compareAtPriceCents,
           is_available: v.is_available,
           display_order: i + 1,
         });
+      }
+    }
+
+    // 5b. Sincronizar grupos de complementos (se informados)
+    if (validated.modifier_groups !== undefined) {
+      await adminClient
+        .from('product_modifier_groups')
+        .delete()
+        .eq('tenant_id', tenant.id)
+        .eq('product_id', productId);
+
+      for (let gIdx = 0; gIdx < validated.modifier_groups.length; gIdx++) {
+        const grp = validated.modifier_groups[gIdx];
+        const minSel = grp.is_required ? Math.max(1, grp.min_selections) : grp.min_selections;
+        const maxSel = Math.max(minSel || 1, grp.max_selections);
+
+        const { data: insertedGroup } = await adminClient
+          .from('product_modifier_groups')
+          .insert({
+            tenant_id: tenant.id,
+            product_id: productId,
+            name: sanitizePlainText(grp.name, 120),
+            is_required: grp.is_required,
+            min_selections: minSel,
+            max_selections: maxSel,
+            display_order: grp.display_order ?? gIdx + 1,
+          })
+          .select('id')
+          .single();
+
+        if (insertedGroup && grp.options.length > 0) {
+          await adminClient.from('product_modifier_options').insert(
+            grp.options.map((opt, oIdx) => ({
+              tenant_id: tenant.id,
+              group_id: insertedGroup.id,
+              name: sanitizePlainText(opt.name, 120),
+              price_in_cents: Math.max(0, opt.price_in_cents),
+              is_available: opt.is_available,
+              display_order: opt.display_order ?? oIdx + 1,
+            }))
+          );
+        }
+      }
+    }
+
+    // 5c. Sincronizar sugestões de produtos ("Peça também")
+    if (validated.suggested_product_ids !== undefined) {
+      await adminClient
+        .from('product_suggestions')
+        .delete()
+        .eq('tenant_id', tenant.id)
+        .eq('product_id', productId);
+
+      const cleanIds = Array.from(
+        new Set(validated.suggested_product_ids.filter((sid) => sid !== productId))
+      );
+      if (cleanIds.length > 0) {
+        await adminClient.from('product_suggestions').insert(
+          cleanIds.map((suggestedId, idx) => ({
+            tenant_id: tenant.id,
+            product_id: productId,
+            suggested_product_id: suggestedId,
+            display_order: idx + 1,
+          }))
+        );
       }
     }
 

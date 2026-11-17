@@ -123,18 +123,17 @@ export function OrderTimeline({
           {steps.map((step, idx) => {
             const isCompleted = idx < currentIndex;
             const isCurrent = idx === currentIndex;
-            const isPending = idx > currentIndex;
             const StepIcon = step.icon;
 
             return (
               <div key={step.key} className="relative flex items-start gap-4 sm:gap-5">
                 {/* Ícone / Marcador */}
                 <div
-                  className={`relative z-10 w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all ${
+                  className={`relative z-10 w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all motion-reduce:transition-none ${
                     isCompleted
                       ? 'bg-emerald-600 text-white shadow-sm'
                       : isCurrent
-                      ? 'bg-tenant-primary text-white ring-4 ring-tenant-primary/20 shadow-md animate-pulse'
+                      ? 'bg-tenant-primary text-white ring-4 ring-tenant-primary/20 shadow-md animate-pulse motion-reduce:animate-none'
                       : 'bg-tenant-surface border-2 border-tenant-border text-tenant-muted'
                   }`}
                 >
@@ -145,7 +144,7 @@ export function OrderTimeline({
                 <div className="flex-1 pt-0.5 sm:pt-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <h4
-                      className={`text-sm sm:text-base font-bold transition-colors ${
+                      className={`text-sm sm:text-base font-bold transition-colors motion-reduce:transition-none ${
                         isCurrent
                           ? 'text-tenant-primary font-extrabold'
                           : isCompleted

@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { resolveTenantByHost } from '@/lib/tenancy/context';
+import { getTenantPublicOrigin } from '@/lib/tenancy/origin';
 import { Container } from '@/components/ui/Container';
 import { FileText, CheckCircle2, ShieldCheck } from 'lucide-react';
 
@@ -16,20 +17,22 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 
   const { tenant } = tenantContext;
+  const origin = getTenantPublicOrigin(tenantContext);
   const title = `Termos de Uso | ${tenant.name}`;
   const description = `Condições gerais de navegação, consulta de cardápio e relacionamento com a ${tenant.name}.`;
 
   return {
+    metadataBase: new URL(origin),
     title,
     description,
     alternates: {
-      canonical: `https://${host}/termos`,
+      canonical: `${origin}/termos`,
     },
     openGraph: {
       title,
       description,
       type: 'website',
-      url: `https://${host}/termos`,
+      url: `${origin}/termos`,
       siteName: tenant.name,
     },
   };

@@ -30,7 +30,7 @@ export const dynamic = 'force-dynamic';
 export default async function AdminDashboardPage() {
   const session = await getAdminAuthSession();
   if (!session) {
-    redirect('/admin/login?error=unauthorized');
+    redirect('/login?error=unauthorized');
   }
 
   const { tenant } = session;

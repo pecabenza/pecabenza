@@ -1,4 +1,7 @@
+import type { SelectedModifierSnapshot } from '@/types/database.types';
+
 export interface CartItem {
+  itemKey?: string;
   productId: string;
   productName: string;
   productSlug: string;
@@ -9,6 +12,7 @@ export interface CartItem {
   coverImageUrl?: string | null;
   unitValue?: number;
   unitType?: string;
+  selectedModifiers?: SelectedModifierSnapshot[];
 }
 
 export interface CartContextType {

@@ -9,6 +9,9 @@ export interface DaySchedule {
   closed: boolean;
 }
 
+export const DEFAULT_DELIVERED_THANK_YOU_MESSAGE =
+  'Seu pedido foi entregue! 🤎 Obrigado por escolher a BENZA. Esperamos que cada garfada seja especial. Bom apetite!';
+
 export interface StructuredBusinessHours {
   is_store_open: boolean;
   pause_reason?: string | null;
@@ -16,8 +19,16 @@ export interface StructuredBusinessHours {
   timezone: string;
   weekly_hours: Record<WeekdayKey, DaySchedule>;
   enabled_payment_methods: StorePaymentOption[];
+  dine_in_enabled?: boolean;
   producao?: string;
   entregas?: string;
+  delivered_thank_you_message?: string;
+  whatsapp_templates?: {
+    confirmed?: string;
+    ready?: string;
+    out_for_delivery?: string;
+    delivered?: string;
+  };
 }
 
 export const DEFAULT_WEEKLY_HOURS: Record<WeekdayKey, DaySchedule> = {
@@ -59,8 +70,34 @@ export function parseStructuredBusinessHours(raw?: Record<string, any> | null): 
     timezone: typeof obj.timezone === 'string' && obj.timezone ? obj.timezone : 'America/Sao_Paulo',
     weekly_hours: weekly,
     enabled_payment_methods: parsedMethods.length > 0 ? parsedMethods : ['pix'],
+    dine_in_enabled: Boolean(obj.dine_in_enabled),
     producao: typeof obj.producao === 'string' ? obj.producao : undefined,
     entregas: typeof obj.entregas === 'string' ? obj.entregas : undefined,
+    delivered_thank_you_message:
+      typeof obj.delivered_thank_you_message === 'string' && obj.delivered_thank_you_message.trim()
+        ? obj.delivered_thank_you_message.trim()
+        : undefined,
+    whatsapp_templates:
+      obj.whatsapp_templates && typeof obj.whatsapp_templates === 'object'
+        ? {
+            confirmed:
+              typeof obj.whatsapp_templates.confirmed === 'string'
+                ? obj.whatsapp_templates.confirmed
+                : undefined,
+            ready:
+              typeof obj.whatsapp_templates.ready === 'string'
+                ? obj.whatsapp_templates.ready
+                : undefined,
+            out_for_delivery:
+              typeof obj.whatsapp_templates.out_for_delivery === 'string'
+                ? obj.whatsapp_templates.out_for_delivery
+                : undefined,
+            delivered:
+              typeof obj.whatsapp_templates.delivered === 'string'
+                ? obj.whatsapp_templates.delivered
+                : undefined,
+          }
+        : undefined,
   };
 }
 

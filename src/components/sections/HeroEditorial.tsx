@@ -44,7 +44,7 @@ export function HeroEditorial({ content }: HeroEditorialProps) {
               {content.primary_cta_label && content.primary_cta_href && (
                 <Link
                   href={content.primary_cta_href}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-tenant bg-tenant-primary text-white font-medium hover:brightness-110 shadow-sm transition-all text-sm group"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-tenant bg-tenant-button hover:bg-tenant-buttonHover text-white font-semibold shadow-sm transition-all text-sm group active:scale-[0.98]"
                 >
                   <span>{content.primary_cta_label}</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -72,7 +72,7 @@ export function HeroEditorial({ content }: HeroEditorialProps) {
             )}
           </div>
 
-          {/* Coluna Visual (Fotografia Editorial) */}
+          {/* Coluna Visual (Fotografia Editorial — LCP imediato sem delay) */}
           {hasImage && content.image_url && (
             <div className="lg:col-span-5 relative">
               <div className="relative aspect-[4/3] sm:aspect-[16/11] lg:aspect-[4/3] rounded-2xl overflow-hidden shadow-2xl border border-tenant-border/60 bg-tenant-surface group">
@@ -81,14 +81,15 @@ export function HeroEditorial({ content }: HeroEditorialProps) {
                   alt={content.title}
                   fill
                   priority
+                  fetchPriority="high"
                   className="object-cover object-center group-hover:scale-105 transition-transform duration-700 ease-out"
-                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 40vw"
+                  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 520px"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-stone-950/40 via-transparent to-transparent opacity-60" />
 
                 {/* Badge Flutuante de Culinária */}
                 <div className="absolute bottom-4 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-6">
-                  <div className="bg-tenant-surface/90 backdrop-blur-md p-3.5 rounded-xl border border-tenant-border/40 shadow-lg flex items-center gap-3">
+                  <div className="bg-tenant-surface p-3.5 rounded-xl border border-tenant-border shadow-lg flex items-center gap-3">
                     <div className="w-9 h-9 rounded-lg bg-tenant-primary/10 text-tenant-primary flex items-center justify-center shrink-0">
                       <UtensilsCrossed className="w-4 h-4" />
                     </div>

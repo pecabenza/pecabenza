@@ -45,6 +45,15 @@ const SaveStoreConfigSchema = z.object({
       .min(1, 'Selecione pelo menos uma forma de pagamento.'),
     producao: z.string().max(120).optional(),
     entregas: z.string().max(120).optional(),
+    delivered_thank_you_message: z.string().max(600).optional(),
+    whatsapp_templates: z
+      .object({
+        confirmed: z.string().max(1500).optional(),
+        ready: z.string().max(1500).optional(),
+        out_for_delivery: z.string().max(1500).optional(),
+        delivered: z.string().max(1500).optional(),
+      })
+      .optional(),
   }),
   paymentGateway: z
     .object({
@@ -102,6 +111,9 @@ export async function POST(request: NextRequest) {
           pause_reason: data.businessHours.pause_reason
             ? sanitizePlainText(data.businessHours.pause_reason)
             : null,
+          delivered_thank_you_message: data.businessHours.delivered_thank_you_message
+            ? sanitizePlainText(data.businessHours.delivered_thank_you_message)
+            : undefined,
         },
       },
       session.user.id

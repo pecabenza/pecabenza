@@ -20,6 +20,9 @@ import {
   Calendar,
   DollarSign,
   Printer,
+  MessageCircle,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -35,6 +38,13 @@ import {
 import { formatBrl } from '@/modules/cart/cart.utils';
 import { OrderPrintModal } from '@/components/admin/orders/OrderPrintModal';
 import { mapOrderDetailToOperationalOrder } from '@/components/admin/orders/order-print-adapter';
+import {
+  buildOrderWhatsAppMessage,
+  buildWhatsAppDeepLink,
+  getDefaultWhatsAppStageForStatus,
+  type WhatsAppMessageStage,
+  type WhatsAppTemplatesMap,
+} from '@/lib/whatsapp/order-messages';
 
 interface OrderDetail {
   id: string;
@@ -106,17 +116,50 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
   const [showCancelPrompt, setShowCancelPrompt] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
+  const [waStage, setWaStage] = useState<WhatsAppMessageStage>('confirmed');
+  const [waMessageText, setWaMessageText] = useState('');
+  const [waCopied, setWaCopied] = useState(false);
+  const [waTemplates, setWaTemplates] = useState<WhatsAppTemplatesMap | null>(null);
 
   const fetchOrder = useCallback(async () => {
     setIsLoading(true);
     setActionError(null);
     try {
-      const res = await fetch(`/api/admin/orders/${orderId}`);
+      const [res, cfgRes] = await Promise.all([
+        fetch(`/api/admin/orders/${orderId}`),
+        fetch('/api/admin/commerce-settings').catch(() => null),
+      ]);
       if (!res.ok) {
         throw new Error('Erro ao carregar detalhes do pedido.');
       }
       const data = await res.json();
+      let loadedTemplates: WhatsAppTemplatesMap | null = null;
+      if (cfgRes && cfgRes.ok) {
+        const cfgData = await cfgRes.json();
+        loadedTemplates = cfgData?.businessHours?.whatsapp_templates || null;
+        setWaTemplates(loadedTemplates);
+      }
       setOrder(data);
+      const nextStage = getDefaultWhatsAppStageForStatus(data.status);
+      setWaStage(nextStage);
+      setWaMessageText(
+        buildOrderWhatsAppMessage(
+          nextStage,
+          {
+            orderNumber: data.order_number,
+            customerName: data.customer_name,
+            fulfillmentType: data.fulfillment_type,
+            paymentMethod: data.payment_method,
+            paymentStatus: data.payment_status,
+            cashChangeForCents: data.cash_change_for_cents,
+            totalCents: data.total_cents,
+            publicTrackingToken: data.public_tracking_token,
+            originUrl: typeof window !== 'undefined' ? window.location.origin : '',
+            items: data.items || [],
+          },
+          loadedTemplates
+        )
+      );
     } catch (err: any) {
       setActionError(err.message || 'Falha de conexão.');
     } finally {
@@ -384,6 +427,110 @@ export default function AdminOrderDetailPage({ params }: { params: Promise<{ id:
             </div>
           </div>
         )}
+      </Card>
+
+      {/* Mensagens Prontas para WhatsApp Business */}
+      <Card className="p-5 bg-emerald-50/40 border border-emerald-200/80 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 text-emerald-700" />
+            <h2 className="text-sm font-bold text-slate-900">
+              Mensagens WhatsApp Business para o Cliente
+            </h2>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'confirmed', label: 'Confirmado' },
+                { id: 'ready', label: 'Pronto / Finalizado' },
+                { id: 'out_for_delivery', label: 'Saiu p/ Entrega' },
+                { id: 'delivered', label: 'Entregue' },
+              ] as Array<{ id: WhatsAppMessageStage; label: string }>
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setWaStage(tab.id);
+                  setWaMessageText(
+                    buildOrderWhatsAppMessage(
+                      tab.id,
+                      {
+                        orderNumber: order.order_number,
+                        customerName: order.customer_name,
+                        fulfillmentType: order.fulfillment_type,
+                        paymentMethod: order.payment_method,
+                        paymentStatus: order.payment_status,
+                        cashChangeForCents: order.cash_change_for_cents,
+                        totalCents: order.total_cents,
+                        publicTrackingToken: order.public_tracking_token,
+                        originUrl: typeof window !== 'undefined' ? window.location.origin : '',
+                        items: order.items || [],
+                      },
+                      waTemplates
+                    )
+                  );
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  waStage === tab.id
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'bg-white text-slate-700 border border-slate-200 hover:bg-emerald-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <textarea
+          rows={5}
+          value={waMessageText}
+          onChange={(e) => setWaMessageText(e.target.value)}
+          className="w-full p-3 rounded-xl bg-white border border-emerald-200 text-xs text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] text-slate-500">
+            Cliente: <strong>{order.customer_phone || 'Sem telefone'}</strong> (edite o texto acima se desejar antes de enviar)
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(waMessageText);
+                  setWaCopied(true);
+                  setTimeout(() => setWaCopied(false), 2000);
+                } catch {
+                  // Fallback ignorado se clipboard indisponível
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-all"
+            >
+              {waCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{waCopied ? 'Copiado!' : 'Copiar Mensagem'}</span>
+            </button>
+            {(() => {
+              const waHref = buildWhatsAppDeepLink(order.customer_phone, waMessageText);
+              return waHref ? (
+                <a
+                  href={waHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Abrir no WhatsApp</span>
+                </a>
+              ) : (
+                <span className="text-[11px] text-amber-700 font-semibold">
+                  Telefone inválido para link direto
+                </span>
+              );
+            })()}
+          </div>
+        </div>
       </Card>
 
       {/* Grid com Dados do Pedido */}

@@ -9,6 +9,7 @@ import {
   calculateCartSubtotal,
   consolidateCartItem,
   updateCartItemQuantity,
+  resolveCartItemKey,
 } from './cart.utils';
 import { trackEvent } from '@/lib/analytics/events';
 
@@ -65,26 +66,15 @@ export function CartProvider({ tenantId, tenantSlug, children }: CartProviderPro
   const addItem = useCallback(
     (newItem: Omit<CartItem, 'quantity'> & { quantity?: number }) => {
       const quantityToAdd = newItem.quantity && newItem.quantity > 0 ? newItem.quantity : 1;
+      const itemKey = resolveCartItemKey(newItem);
 
-      setItems((prevItems) => {
-        const existingIndex = prevItems.findIndex((i) => i.variantId === newItem.variantId);
-        if (existingIndex > -1) {
-          const updated = [...prevItems];
-          updated[existingIndex] = {
-            ...updated[existingIndex],
-            quantity: updated[existingIndex].quantity + quantityToAdd,
-          };
-          return updated;
-        } else {
-          return [
-            ...prevItems,
-            {
-              ...newItem,
-              quantity: quantityToAdd,
-            },
-          ];
-        }
-      });
+      setItems((prevItems) =>
+        consolidateCartItem(prevItems, {
+          ...newItem,
+          itemKey,
+          quantity: quantityToAdd,
+        })
+      );
 
       // Disparar evento de e-commerce
       trackEvent('add_to_cart', {
@@ -105,19 +95,21 @@ export function CartProvider({ tenantId, tenantSlug, children }: CartProviderPro
 
   // Remover item
   const removeItem = useCallback(
-    (variantId: string) => {
+    (itemKeyOrVariantId: string) => {
       setItems((prevItems) => {
-        const itemToRemove = prevItems.find((i) => i.variantId === variantId);
+        const matches = (i: CartItem) =>
+          resolveCartItemKey(i) === itemKeyOrVariantId || i.variantId === itemKeyOrVariantId;
+        const itemToRemove = prevItems.find(matches);
         if (itemToRemove) {
           trackEvent('remove_from_cart' as any, {
             tenantId,
             tenantSlug,
             productId: itemToRemove.productId,
             productName: itemToRemove.productName,
-            variantId,
+            variantId: itemToRemove.variantId,
           });
         }
-        return prevItems.filter((i) => i.variantId !== variantId);
+        return prevItems.filter((i) => !matches(i));
       });
     },
     [tenantId, tenantSlug]
@@ -125,17 +117,12 @@ export function CartProvider({ tenantId, tenantSlug, children }: CartProviderPro
 
   // Atualizar quantidade
   const updateQuantity = useCallback(
-    (variantId: string, quantity: number) => {
+    (itemKeyOrVariantId: string, quantity: number) => {
       if (quantity <= 0) {
-        removeItem(variantId);
+        removeItem(itemKeyOrVariantId);
         return;
       }
-
-      setItems((prevItems) =>
-        prevItems.map((item) =>
-          item.variantId === variantId ? { ...item, quantity } : item
-        )
-      );
+      setItems((prevItems) => updateCartItemQuantity(prevItems, itemKeyOrVariantId, quantity));
     },
     [removeItem]
   );

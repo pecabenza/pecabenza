@@ -27,6 +27,7 @@ import type { OperationalOrder, OperationalMetrics } from '@/modules/orders/orde
 import type { CanonicalOrderStatus } from '@/modules/orders/order-status.machine';
 import { OperationalOrderCard } from '@/components/admin/orders/OperationalOrderCard';
 import { OrderPrintModal } from '@/components/admin/orders/OrderPrintModal';
+import { useSystemDialog } from '@/components/ui/SystemDialogProvider';
 import {
   isSoundEnabled,
   setSoundEnabled,
@@ -49,6 +50,7 @@ type QuickFilter =
   | 'ch_website';
 
 export default function OperationalKitchenPage() {
+  const { showAlert } = useSystemDialog();
   const [orders, setOrders] = useState<OperationalOrder[]>([]);
   const [metrics, setMetrics] = useState<OperationalMetrics>({
     totalActive: 0,
@@ -141,7 +143,11 @@ export default function OperationalKitchenPage() {
       // Re-sincroniza imediatamente
       await fetchOperationalData(true);
     } catch (err: any) {
-      alert(`Não foi possível avançar o pedido: ${err.message}`);
+      await showAlert({
+        title: 'Erro ao avançar pedido',
+        message: `Não foi possível avançar o pedido: ${err.message}`,
+        variant: 'error',
+      });
     }
   };
 
@@ -164,7 +170,11 @@ export default function OperationalKitchenPage() {
 
       await fetchOperationalData(true);
     } catch (err: any) {
-      alert(`Não foi possível confirmar o pagamento: ${err.message}`);
+      await showAlert({
+        title: 'Erro ao confirmar pagamento',
+        message: `Não foi possível confirmar o pagamento: ${err.message}`,
+        variant: 'error',
+      });
     }
   };
 
@@ -477,7 +487,7 @@ export default function OperationalKitchenPage() {
       {/* Colunas Operacionais / Swimlanes */}
       <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
         {/* Coluna 1: Novos / Pendentes */}
-        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3">
+        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3 min-w-0">
           <div className="flex items-center justify-between pb-2 border-b border-stone-200/80">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
@@ -508,7 +518,7 @@ export default function OperationalKitchenPage() {
         </div>
 
         {/* Coluna 2: Confirmados */}
-        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3">
+        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3 min-w-0">
           <div className="flex items-center justify-between pb-2 border-b border-stone-200/80">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
@@ -539,7 +549,7 @@ export default function OperationalKitchenPage() {
         </div>
 
         {/* Coluna 3: Em Preparação */}
-        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3">
+        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3 min-w-0">
           <div className="flex items-center justify-between pb-2 border-b border-stone-200/80">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
@@ -570,7 +580,7 @@ export default function OperationalKitchenPage() {
         </div>
 
         {/* Coluna 4: Prontos */}
-        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3">
+        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3 min-w-0">
           <div className="flex items-center justify-between pb-2 border-b border-stone-200/80">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
@@ -601,7 +611,7 @@ export default function OperationalKitchenPage() {
         </div>
 
         {/* Coluna 5: Saiu para Entrega */}
-        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3">
+        <div className="bg-stone-100/80 rounded-2xl p-3 border border-stone-200 space-y-3 min-w-0">
           <div className="flex items-center justify-between pb-2 border-b border-stone-200/80">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
