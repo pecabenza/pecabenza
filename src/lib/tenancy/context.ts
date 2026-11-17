@@ -97,6 +97,17 @@ export function normalizeHostname(hostWithPort: string): string {
 }
 
 /**
+ * Identifica URLs oficiais de deploy/preview do projeto BENZA na Vercel
+ * (ex: pecabenza.vercel.app ou pecabenza-g8fi2gmcj-pecabenza.vercel.app).
+ */
+export function isBenzaVercelDeploymentHost(hostname: string): boolean {
+  return (
+    hostname === 'pecabenza.vercel.app' ||
+    /^pecabenza-[a-z0-9-]+(\.vercel\.app)$/i.test(hostname)
+  );
+}
+
+/**
  * Limpa o cache de resolução (útil para testes unitários)
  */
 export function clearTenantCache(): void {
@@ -125,11 +136,12 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
 
   const isProduction = process.env.NODE_ENV === 'production';
   const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === 'benza.localhost';
+  const isBenzaVercelHost = isBenzaVercelDeploymentHost(hostname);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const isPlaceholderDb = !supabaseUrl || supabaseUrl.includes('placeholder');
 
-  // REGRA 1: Fallback exclusivo para DEV em ambiente loopback com banco placeholder
-  if (!isProduction && isLoopback && isPlaceholderDb) {
+  // REGRA 1: Fallback para DEV em loopback ou URL oficial de deploy Vercel quando sem banco configurado
+  if ((!isProduction && isLoopback && isPlaceholderDb) || (isBenzaVercelHost && isPlaceholderDb)) {
     return DEFAULT_DEV_CONTEXT;
   }
 
@@ -156,14 +168,19 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
       .eq('is_verified', true)
       .maybeSingle();
 
-    if (domainError || !domainData?.tenant_id) {
+    let tenantId: string | null = !domainError && domainData?.tenant_id ? domainData.tenant_id : null;
+
+    // Suporte automático a URLs dinâmicas de preview/deploy do projeto pecabenza na Vercel
+    if (!tenantId && isBenzaVercelHost) {
+      tenantId = DEFAULT_DEV_CONTEXT.tenant.id;
+    }
+
+    if (!tenantId) {
       if (!isProduction && isLoopback) {
         return DEFAULT_DEV_CONTEXT;
       }
       return null;
     }
-
-    const tenantId = domainData.tenant_id;
 
     // 2.3 Carregar dados completos do tenant associado
     const [tenantRes, domainsRes, settingsRes, brandingRes, commerceRes] = await Promise.all([
@@ -175,6 +192,9 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
     ]);
 
     if (!tenantRes.data || tenantRes.data.status !== 'active') {
+      if (isBenzaVercelHost) {
+        return DEFAULT_DEV_CONTEXT;
+      }
       return null;
     }
 
@@ -190,6 +210,10 @@ export async function resolveTenantByHost(rawHost: string): Promise<TenantFullCo
     return fullContext;
   } catch (error) {
     console.error(`[Tenancy] Erro ao resolver host ${hostname}:`, error);
+
+    if (isBenzaVercelHost) {
+      return DEFAULT_DEV_CONTEXT;
+    }
 
     if (isProduction) {
       return null;

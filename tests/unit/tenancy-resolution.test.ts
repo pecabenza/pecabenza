@@ -79,4 +79,19 @@ describe('Resolução de Tenant e Isolamento de Domínio', () => {
     expect(result).not.toBeNull();
     expect(result?.tenant.slug).toBe('benza');
   });
+
+  it('EM VERCEL PREVIEW/DEPLOY: aceita subdomínios oficiais pecabenza*.vercel.app e rejeita outros projetos vercel.app', async () => {
+    setEnv('production');
+
+    const validPreview = await resolveTenantByHost('pecabenza-g8fi2gmcj-pecabenza.vercel.app');
+    expect(validPreview).not.toBeNull();
+    expect(validPreview?.tenant.slug).toBe('benza');
+
+    const validMainVercel = await resolveTenantByHost('pecabenza.vercel.app');
+    expect(validMainVercel).not.toBeNull();
+    expect(validMainVercel?.tenant.slug).toBe('benza');
+
+    const foreignVercel = await resolveTenantByHost('outro-restaurante-xyz.vercel.app');
+    expect(foreignVercel).toBeNull();
+  });
 });
