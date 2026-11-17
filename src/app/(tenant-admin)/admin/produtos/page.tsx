@@ -1140,7 +1140,7 @@ export default function AdminProductsPage() {
                 <div>
                   <h3 className="font-bold text-xs uppercase text-stone-900 tracking-wider flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-amber-600" />
-                    <span>Sugestões ("Peça também")</span>
+                    <span>Sugestões (&ldquo;Peça também&rdquo;)</span>
                   </h3>
                   <p className="text-[11px] text-stone-500">
                     Escolha pratos ou acompanhamentos sugeridos na página deste produto.

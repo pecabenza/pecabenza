@@ -38,7 +38,7 @@ export default function ProducaoPage() {
   // Formulário Nova Ordem
   const [orderForm, setOrderForm] = useState({
     recipeId: '',
-    orderCode: `OP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`,
+    orderCode: 'OP-001',
     plannedMultiplier: '1.0',
     notes: '',
   });

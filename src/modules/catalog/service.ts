@@ -187,7 +187,7 @@ async function hydrateProductModifiersAndSuggestions(
   const productIds = products.map((p) => p.id);
 
   // Carregamento resiliente: se migration 00017 ainda não tiver sido aplicada, segue sem quebrar o catálogo
-  let groupsByProduct = new Map<string, ProductModifierGroup[]>();
+  const groupsByProduct = new Map<string, ProductModifierGroup[]>();
   try {
     const { data: groupsData } = await supabase
       .from('product_modifier_groups')
@@ -214,7 +214,7 @@ async function hydrateProductModifiersAndSuggestions(
     // Tabela opcional ainda não migrada
   }
 
-  let suggestionIdsByProduct = new Map<string, string[]>();
+  const suggestionIdsByProduct = new Map<string, string[]>();
   try {
     const { data: suggestionsData } = await supabase
       .from('product_suggestions')

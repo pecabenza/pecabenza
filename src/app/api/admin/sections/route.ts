@@ -95,12 +95,13 @@ export async function GET(request: NextRequest) {
     }
 
     // 2. Buscar seções cadastradas
-    let { data: sections, error: secError } = await adminClient
+    const { data: rawSections, error: secError } = await adminClient
       .from('tenant_page_sections')
       .select('*')
       .eq('tenant_id', tenant.id)
       .eq('page_id', page.id)
       .order('display_order', { ascending: true });
+    let sections = rawSections;
 
     if (secError) {
       return NextResponse.json(

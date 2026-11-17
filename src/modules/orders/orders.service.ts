@@ -759,7 +759,7 @@ export async function updateOrderStatus(
   }
 
   // 3. Regra de cancelamento com pagamento já liquidado
-  let finalMetadata = { ...(metadata || {}) };
+  const finalMetadata = { ...(metadata || {}) };
   if (toStatus === 'cancelled' && order.payment_status === 'paid') {
     finalMetadata.requires_manual_refund = true;
     finalMetadata.notice = 'Pedido pago cancelado; estorno manual necessário no gateway.';
