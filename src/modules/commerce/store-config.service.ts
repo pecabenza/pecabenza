@@ -8,6 +8,7 @@ import {
   parseStructuredBusinessHours,
   evaluateStoreAvailability,
   evaluateCommercialReadiness,
+  getConfiguredScheduleWindows,
   type StructuredBusinessHours,
   type StorePaymentOption,
   type CommercialReadinessResult,
@@ -27,7 +28,7 @@ export interface SaveStoreCommerceInput {
   businessHours: StructuredBusinessHours;
   // Opcionais para configuração do gateway Pix junto na tela da loja
   paymentGateway?: {
-    provider: 'mock' | 'asaas' | 'mercadopago';
+    provider: 'mock' | 'asaas';
     isActive: boolean;
     pixEnabled: boolean;
     pixExpirationMinutes: number;
@@ -346,12 +347,21 @@ export async function getPublicStorefrontConfig(tenantId: string, siteMode: Site
       scheduledEnabled: commerceSettings.scheduled_enabled,
       estimatedDeliveryTimeMin: commerceSettings.estimated_delivery_time_min,
       estimatedPickupTimeMin: commerceSettings.estimated_pickup_time_min,
+      pricingMode: ((commerceSettings as any).pricing_mode || 'fixed') as
+        | 'fixed'
+        | 'distance'
+        | 'distance_band'
+        | 'external_quote',
+      maxDeliveryDistanceKm: Number((commerceSettings as any).max_delivery_distance_km ?? 10),
     },
     enabledPaymentMethods: businessHours.enabled_payment_methods as StorePaymentOption[],
     businessHoursSummary: {
       producao: businessHours.producao || null,
       entregas: businessHours.entregas || null,
       enforceSchedule: businessHours.enforce_schedule,
+      timezone: businessHours.timezone,
+      minScheduleLeadMinutes: businessHours.min_schedule_lead_minutes || 0,
+      scheduleWindows: getConfiguredScheduleWindows(businessHours),
       weeklyHours: businessHours.weekly_hours,
     },
   };

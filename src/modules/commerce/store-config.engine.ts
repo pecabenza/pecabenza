@@ -1,4 +1,5 @@
 import type { TenantCommerceSettings } from '@/types/database.types';
+import { parseCouponCampaigns, type CouponCampaign } from './coupon.engine';
 
 export type StorePaymentOption = 'pix' | 'cash' | 'card_on_delivery';
 export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
@@ -12,6 +13,18 @@ export interface DaySchedule {
 export const DEFAULT_DELIVERED_THANK_YOU_MESSAGE =
   'Seu pedido foi entregue! 🤎 Obrigado por escolher a BENZA. Esperamos que cada garfada seja especial. Bom apetite!';
 
+export interface ScheduleWindowConfig {
+  value: string; // Ex: '11:30 - 13:30'
+  label: string;
+  fulfillmentTypes?: ('delivery' | 'pickup')[];
+}
+
+export const DEFAULT_SCHEDULE_WINDOWS: ScheduleWindowConfig[] = [
+  { value: '11:30 - 13:30', label: 'Manhã / Almoço (11:30 às 13:30)', fulfillmentTypes: ['delivery', 'pickup'] },
+  { value: '15:00 - 18:00', label: 'Tarde (15:00 às 18:00)', fulfillmentTypes: ['delivery', 'pickup'] },
+  { value: '18:30 - 21:00', label: 'Noite (18:30 às 21:00)', fulfillmentTypes: ['delivery', 'pickup'] },
+];
+
 export interface StructuredBusinessHours {
   is_store_open: boolean;
   pause_reason?: string | null;
@@ -19,10 +32,13 @@ export interface StructuredBusinessHours {
   timezone: string;
   weekly_hours: Record<WeekdayKey, DaySchedule>;
   enabled_payment_methods: StorePaymentOption[];
+  min_schedule_lead_minutes?: number;
+  schedule_windows?: ScheduleWindowConfig[];
   dine_in_enabled?: boolean;
   producao?: string;
   entregas?: string;
   delivered_thank_you_message?: string;
+  coupon_campaigns?: CouponCampaign[];
   whatsapp_templates?: {
     confirmed?: string;
     ready?: string;
@@ -70,6 +86,20 @@ export function parseStructuredBusinessHours(raw?: Record<string, any> | null): 
     timezone: typeof obj.timezone === 'string' && obj.timezone ? obj.timezone : 'America/Sao_Paulo',
     weekly_hours: weekly,
     enabled_payment_methods: parsedMethods.length > 0 ? parsedMethods : ['pix'],
+    min_schedule_lead_minutes:
+      typeof obj.min_schedule_lead_minutes === 'number' && obj.min_schedule_lead_minutes >= 0
+        ? Math.floor(obj.min_schedule_lead_minutes)
+        : 0,
+    schedule_windows: Array.isArray(obj.schedule_windows)
+      ? obj.schedule_windows.filter(
+          (w: any): w is ScheduleWindowConfig =>
+            Boolean(w) &&
+            typeof w.value === 'string' &&
+            /^\d{2}:\d{2}\s*-\s*\d{2}:\d{2}$/.test(w.value.trim()) &&
+            typeof w.label === 'string' &&
+            w.label.trim().length > 0
+        )
+      : undefined,
     dine_in_enabled: Boolean(obj.dine_in_enabled),
     producao: typeof obj.producao === 'string' ? obj.producao : undefined,
     entregas: typeof obj.entregas === 'string' ? obj.entregas : undefined,
@@ -77,6 +107,7 @@ export function parseStructuredBusinessHours(raw?: Record<string, any> | null): 
       typeof obj.delivered_thank_you_message === 'string' && obj.delivered_thank_you_message.trim()
         ? obj.delivered_thank_you_message.trim()
         : undefined,
+    coupon_campaigns: parseCouponCampaigns(obj.coupon_campaigns),
     whatsapp_templates:
       obj.whatsapp_templates && typeof obj.whatsapp_templates === 'object'
         ? {
@@ -198,6 +229,220 @@ export function evaluateStoreAvailability(
   }
 
   return { open: true, allowsScheduled };
+}
+
+const WEEKDAY_MAP: Record<string, WeekdayKey> = {
+  sun: 'sun',
+  mon: 'mon',
+  tue: 'tue',
+  wed: 'wed',
+  thu: 'thu',
+  fri: 'fri',
+  sat: 'sat',
+};
+
+export function getZonedDateParts(
+  date: Date,
+  timeZone: string
+): { weekday: WeekdayKey; dateStr: string; hm: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  const weekdayRaw = (parts.find((p) => p.type === 'weekday')?.value || 'mon').toLowerCase().slice(0, 3);
+  const year = parts.find((p) => p.type === 'year')?.value || '1970';
+  const month = parts.find((p) => p.type === 'month')?.value || '01';
+  const day = parts.find((p) => p.type === 'day')?.value || '01';
+  const hourRaw = parts.find((p) => p.type === 'hour')?.value || '00';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+  const hour = hourRaw === '24' ? '00' : hourRaw;
+
+  return {
+    weekday: WEEKDAY_MAP[weekdayRaw] || 'mon',
+    dateStr: `${year}-${month}-${day}`,
+    hm: `${hour}:${minute}`,
+  };
+}
+
+/**
+ * Converte data (YYYY-MM-DD) + horário (HH:MM) no fuso do estabelecimento para ISO UTC.
+ */
+export function zonedDateTimeToIso(dateStr: string, hm: string, timeZone: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const [hh, mm] = hm.split(':').map(Number);
+  const desiredUtcMs = Date.UTC(y, m - 1, d, hh, mm, 0);
+  let candidate = new Date(desiredUtcMs);
+
+  for (let i = 0; i < 2; i++) {
+    const parts = getZonedDateParts(candidate, timeZone);
+    const [zy, zm, zd] = parts.dateStr.split('-').map(Number);
+    const [zhh, zmm] = parts.hm.split(':').map(Number);
+    const actualAsUtcMs = Date.UTC(zy, zm - 1, zd, zhh, zmm, 0);
+    const diffMs = desiredUtcMs - actualAsUtcMs;
+    if (diffMs === 0) break;
+    candidate = new Date(candidate.getTime() + diffMs);
+  }
+
+  return candidate.toISOString();
+}
+
+export function getConfiguredScheduleWindows(
+  businessHours: Pick<StructuredBusinessHours, 'schedule_windows'>
+): ScheduleWindowConfig[] {
+  if (businessHours.schedule_windows && businessHours.schedule_windows.length > 0) {
+    return businessHours.schedule_windows;
+  }
+  return DEFAULT_SCHEDULE_WINDOWS;
+}
+
+export function getAvailableScheduleWindowsForDate(
+  businessHours: StructuredBusinessHours,
+  dateStr: string,
+  fulfillmentType: 'delivery' | 'pickup'
+): ScheduleWindowConfig[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return [];
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const utcMidday = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const tz = businessHours.timezone || 'America/Sao_Paulo';
+  const { weekday } = getZonedDateParts(utcMidday, tz);
+  const daySchedule = businessHours.weekly_hours[weekday];
+  if (!daySchedule || daySchedule.closed) return [];
+
+  return getConfiguredScheduleWindows(businessHours).filter((win) => {
+    const allowedTypes = win.fulfillmentTypes && win.fulfillmentTypes.length > 0
+      ? win.fulfillmentTypes
+      : ['delivery', 'pickup'];
+    if (!allowedTypes.includes(fulfillmentType)) return false;
+
+    const match = win.value.trim().match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+    if (!match) return false;
+    const [, startHm, endHm] = match;
+    return startHm >= daySchedule.open && endHm <= daySchedule.close && startHm < endHm;
+  });
+}
+
+/**
+ * Validação autoritativa compartilhada (frontend/backend) de data, janela e disponibilidade de agendamento.
+ */
+export function validateScheduledOrderSlot(
+  businessHours: StructuredBusinessHours,
+  commerceSettings: Pick<TenantCommerceSettings, 'scheduled_enabled' | 'delivery_enabled' | 'pickup_enabled'>,
+  params: {
+    scheduledFor?: string | null;
+    scheduledWindow?: string | null;
+    fulfillmentType: 'delivery' | 'pickup';
+    now?: Date;
+  }
+): { valid: boolean; reason?: string } {
+  if (!commerceSettings.scheduled_enabled) {
+    return { valid: false, reason: 'Pedidos agendados estão desabilitados no momento.' };
+  }
+
+  if (!businessHours.is_store_open) {
+    return {
+      valid: false,
+      reason:
+        businessHours.pause_reason?.trim() ||
+        'A loja está temporariamente pausada e não está aceitando agendamentos.',
+    };
+  }
+
+  if (params.fulfillmentType === 'delivery' && !commerceSettings.delivery_enabled) {
+    return { valid: false, reason: 'Entrega está desabilitada para agendamentos.' };
+  }
+  if (params.fulfillmentType === 'pickup' && !commerceSettings.pickup_enabled) {
+    return { valid: false, reason: 'Retirada está desabilitada para agendamentos.' };
+  }
+
+  if (!params.scheduledFor) {
+    return { valid: false, reason: 'Horário de agendamento não informado.' };
+  }
+
+  const scheduledDate = new Date(params.scheduledFor);
+  const now = params.now || new Date();
+  if (isNaN(scheduledDate.getTime()) || scheduledDate.getTime() < now.getTime() - 60_000) {
+    return { valid: false, reason: 'O horário de agendamento não pode estar no passado.' };
+  }
+
+  const leadMinutes = businessHours.min_schedule_lead_minutes || 0;
+  if (leadMinutes > 0 && scheduledDate.getTime() < now.getTime() + leadMinutes * 60_000 - 60_000) {
+    return {
+      valid: false,
+      reason: `Agendamentos exigem antecedência mínima de ${leadMinutes} minutos.`,
+    };
+  }
+
+  const tz = businessHours.timezone || 'America/Sao_Paulo';
+  const zonedTarget = getZonedDateParts(scheduledDate, tz);
+  const daySchedule = businessHours.weekly_hours[zonedTarget.weekday];
+
+  if (!daySchedule || daySchedule.closed) {
+    return {
+      valid: false,
+      reason: 'O estabelecimento não funciona no dia selecionado para agendamentos.',
+    };
+  }
+
+  if (zonedTarget.hm < daySchedule.open || zonedTarget.hm > daySchedule.close) {
+    return {
+      valid: false,
+      reason: `O horário selecionado (${zonedTarget.hm}) está fora do funcionamento (${daySchedule.open} às ${daySchedule.close}).`,
+    };
+  }
+
+  if (params.scheduledWindow !== undefined && params.scheduledWindow !== null) {
+    const normalizedWindow = params.scheduledWindow.trim();
+    const match = normalizedWindow.match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+    if (!match) {
+      return { valid: false, reason: 'Formato de janela de agendamento inválido.' };
+    }
+    const [, winStart, winEnd] = match;
+    if (winStart >= winEnd) {
+      return { valid: false, reason: 'Janela de agendamento inválida.' };
+    }
+
+    const configuredWindows = getConfiguredScheduleWindows(businessHours);
+    const matchedConfig = configuredWindows.find(
+      (w) => w.value.replace(/\s+/g, '') === normalizedWindow.replace(/\s+/g, '')
+    );
+    if (!matchedConfig) {
+      return { valid: false, reason: 'A janela de agendamento selecionada não é permitida.' };
+    }
+
+    const allowedTypes =
+      matchedConfig.fulfillmentTypes && matchedConfig.fulfillmentTypes.length > 0
+        ? matchedConfig.fulfillmentTypes
+        : ['delivery', 'pickup'];
+    if (!allowedTypes.includes(params.fulfillmentType)) {
+      return {
+        valid: false,
+        reason: `A janela ${normalizedWindow} não está disponível para ${params.fulfillmentType === 'delivery' ? 'entrega' : 'retirada'}.`,
+      };
+    }
+
+    if (winStart < daySchedule.open || winEnd > daySchedule.close) {
+      return {
+        valid: false,
+        reason: `A janela ${normalizedWindow} ultrapassa o horário de funcionamento (${daySchedule.open} às ${daySchedule.close}).`,
+      };
+    }
+
+    if (zonedTarget.hm !== winStart) {
+      return {
+        valid: false,
+        reason: 'O horário enviado não corresponde ao início da janela de agendamento selecionada.',
+      };
+    }
+  }
+
+  return { valid: true };
 }
 
 export interface CommercialReadinessInput {

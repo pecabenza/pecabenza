@@ -2,11 +2,11 @@
 
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { ArrowRight, Search, X, UtensilsCrossed } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { QuickAddToCartButton } from '@/components/cart/QuickAddToCartButton';
+import { SafeProductImage } from '@/components/storefront/SafeProductImage';
 import { getProductDisplayPrice } from '@/modules/catalog/pricing';
 import { buildCatalogSections } from '@/modules/catalog/catalog-filter';
 import { formatBrl } from '@/modules/cart/cart.utils';
@@ -16,12 +16,14 @@ interface StorefrontCatalogViewProps {
   products: Product[];
   categories: ProductCategory[];
   siteMode: SiteMode;
+  variant?: 'default' | 'compact';
 }
 
 export function StorefrontCatalogView({
   products,
   categories,
   siteMode,
+  variant = 'default',
 }: StorefrontCatalogViewProps) {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,6 +84,93 @@ export function StorefrontCatalogView({
     const hasModifiers = Boolean(product.modifier_groups && product.modifier_groups.length > 0);
     const isAvailable = displayPrice ? displayPrice.hasAvailableVariant : false;
 
+    if (variant === 'compact') {
+      return (
+        <Card
+          key={product.id}
+          hoverEffect
+          className="flex flex-row items-stretch bg-tenant-surface overflow-hidden group motion-reduce:transition-none"
+        >
+          <Link
+            href={`/produtos/${product.slug}`}
+            className="w-28 sm:w-36 shrink-0 bg-tenant-background relative flex items-center justify-center overflow-hidden border-r border-tenant-border/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-tenant-primary"
+          >
+            <SafeProductImage
+              src={product.cover_image_url}
+              alt={product.name}
+              categoryLabel={product.category?.name || 'Prato'}
+              sizes="144px"
+              className="object-cover group-hover:scale-105 transition-transform duration-500 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+            />
+            {displayPrice?.hasPromo && displayPrice.discountPercentage && (
+              <Badge className="absolute top-2 left-2 z-10 text-[10px] bg-emerald-600 text-white border-none font-bold">
+                -{displayPrice.discountPercentage}%
+              </Badge>
+            )}
+            {!isAvailable && (
+              <Badge className="absolute top-2 left-2 z-10 text-[10px] bg-stone-800 text-white border-none font-bold">
+                Indisponível
+              </Badge>
+            )}
+          </Link>
+
+          <div className="p-3.5 sm:p-4 flex flex-col flex-1 justify-between gap-2 min-w-0">
+            <div className="space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <Link
+                  href={`/produtos/${product.slug}`}
+                  className="font-heading text-base sm:text-lg font-bold text-tenant-text group-hover:text-tenant-primary transition-colors line-clamp-1"
+                >
+                  {product.name}
+                </Link>
+              </div>
+              {product.short_description && (
+                <p className="text-xs text-tenant-muted leading-snug line-clamp-2">
+                  {product.short_description}
+                </p>
+              )}
+              {hasModifiers && (
+                <span className="inline-block text-[10px] font-medium text-tenant-secondary">
+                  Personalizável com complementos
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-tenant-border/40">
+              {displayPrice ? (
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  {displayPrice.hasPromo && displayPrice.compareAtPriceCents && (
+                    <span className="text-[11px] text-tenant-muted line-through">
+                      {formatBrl(displayPrice.compareAtPriceCents)}
+                    </span>
+                  )}
+                  <span className="font-heading text-sm sm:text-base font-extrabold text-tenant-primary">
+                    {displayPrice.hasPromo
+                      ? formatBrl(displayPrice.priceInCents)
+                      : displayPrice.hasMultipleVariants
+                      ? `A partir de ${formatBrl(displayPrice.priceInCents)}`
+                      : formatBrl(displayPrice.priceInCents)}
+                  </span>
+                </div>
+              ) : (
+                <span />
+              )}
+
+              <div className="flex items-center gap-1.5">
+                <Link
+                  href={`/produtos/${product.slug}`}
+                  className="px-2.5 py-2 rounded-tenant bg-tenant-surface border border-tenant-border text-[11px] font-semibold text-tenant-text hover:border-tenant-primary hover:text-tenant-primary transition-colors"
+                >
+                  Detalhes
+                </Link>
+                <QuickAddToCartButton product={product} siteMode={siteMode} />
+              </div>
+            </div>
+          </div>
+        </Card>
+      );
+    }
+
     return (
       <Card
         key={product.id}
@@ -93,28 +182,14 @@ export function StorefrontCatalogView({
           href={`/produtos/${product.slug}`}
           className="aspect-[16/10] bg-tenant-background relative flex items-center justify-center overflow-hidden border-b border-tenant-border/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-tenant-primary"
         >
-          {product.cover_image_url ? (
-            <>
-              <Image
-                src={product.cover_image_url}
-                alt={product.name}
-                fill
-                loading="lazy"
-                className="object-cover group-hover:scale-105 transition-transform duration-500 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
-                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-40" />
-            </>
-          ) : (
-            <div className="text-center space-y-1 p-5">
-              <span className="text-xs uppercase tracking-widest text-tenant-muted font-semibold block">
-                {product.category?.name || 'Prato'}
-              </span>
-              <p className="font-heading text-xl font-bold text-tenant-text line-clamp-1">
-                {product.name}
-              </p>
-            </div>
-          )}
+          <SafeProductImage
+            src={product.cover_image_url}
+            alt={product.name}
+            categoryLabel={product.category?.name || 'Prato'}
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            className="object-cover group-hover:scale-105 transition-transform duration-500 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+            overlayClassName="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-40"
+          />
 
           <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 flex-wrap">
             {product.category?.name && (
@@ -319,7 +394,13 @@ export function StorefrontCatalogView({
                   {section.items.length === 1 ? 'opção' : 'opções'}
                 </span>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+              <div
+                className={
+                  variant === 'compact'
+                    ? 'grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-4'
+                    : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8'
+                }
+              >
                 {section.items.map(renderProductCard)}
               </div>
             </section>

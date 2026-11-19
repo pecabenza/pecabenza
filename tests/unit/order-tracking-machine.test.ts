@@ -89,11 +89,14 @@ describe('Etapa 2C — Máquina de Estados e Acompanhamento Seguro de Pedidos', 
   });
 
   describe('3. Proteção e Segurança do Token de Rastreio Público', () => {
-    it('deve rejeitar tokens vazios, curtos ou inválidos', async () => {
-      expect(await getPublicOrderTracking('')).toBeNull();
-      expect(await getPublicOrderTracking('12345')).toBeNull();
-      expect(await getPublicOrderTracking('token com espaco')).toBeNull();
-      expect(await getPublicOrderTracking(null as any)).toBeNull();
+    const TENANT_ID = '00000000-0000-0000-0000-000000000001';
+
+    it('deve rejeitar tokens vazios, curtos ou inválidos e tenantId ausente', async () => {
+      expect(await getPublicOrderTracking('', TENANT_ID)).toBeNull();
+      expect(await getPublicOrderTracking('12345', TENANT_ID)).toBeNull();
+      expect(await getPublicOrderTracking('token com espaco', TENANT_ID)).toBeNull();
+      expect(await getPublicOrderTracking(null as any, TENANT_ID)).toBeNull();
+      expect(await getPublicOrderTracking('7K9M2P4X8B', '')).toBeNull();
     });
 
     it('deve gerar token curto de 10 caracteres sem caracteres ambíguos e aceitar tokens curtos e legados', () => {

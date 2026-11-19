@@ -188,32 +188,38 @@ describe('Gate Final de Homologação — Pedido Rápido (Etapa 2) & Acompanhame
       }
 
       if (table === 'orders') {
+        const trackingOrderData = {
+          id: 'ord-track-1',
+          tenant_id: TENANT_A,
+          order_number: '#1050',
+          public_tracking_token: '7K9M2P4X8B',
+          fulfillment_type: 'delivery',
+          schedule_type: 'asap',
+          scheduled_for: null,
+          status: 'delivered',
+          payment_status: 'paid',
+          subtotal_cents: 3690,
+          delivery_fee_cents: 1000,
+          total_cents: 4690,
+          notes: null,
+          created_at: new Date().toISOString(),
+          customer_name: 'Maria Oliveira',
+          customer_phone: '75999887766',
+        };
         return {
           select: () => ({
-            eq: (_col: string, val: string) => ({
+            eq: (_col1: string, val1: string) => ({
+              eq: (_col2: string, val2: string) => ({
+                maybeSingle: async () => {
+                  if (val1 === TENANT_A && val2 === '7K9M2P4X8B') {
+                    return { data: trackingOrderData, error: null };
+                  }
+                  return { data: null, error: null };
+                },
+              }),
               maybeSingle: async () => {
-                if (val === '7K9M2P4X8B') {
-                  return {
-                    data: {
-                      id: 'ord-track-1',
-                      tenant_id: TENANT_A,
-                      order_number: '#1050',
-                      public_tracking_token: '7K9M2P4X8B',
-                      fulfillment_type: 'delivery',
-                      schedule_type: 'asap',
-                      scheduled_for: null,
-                      status: 'delivered',
-                      payment_status: 'paid',
-                      subtotal_cents: 3690,
-                      delivery_fee_cents: 1000,
-                      total_cents: 4690,
-                      notes: null,
-                      created_at: new Date().toISOString(),
-                      customer_name: 'Maria Oliveira',
-                      customer_phone: '75999887766',
-                    },
-                    error: null,
-                  };
+                if (val1 === '7K9M2P4X8B') {
+                  return { data: trackingOrderData, error: null };
                 }
                 return { data: null, error: null };
               },

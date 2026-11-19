@@ -1,7 +1,6 @@
 import React from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import Image from 'next/image';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Clock, Snowflake, ShieldCheck, Flame, Info } from 'lucide-react';
@@ -13,6 +12,7 @@ import { Badge } from '@/components/ui/Badge';
 import { generateProductJsonLd, generateBreadcrumbJsonLd } from '@/lib/seo/schema';
 import { ProductCommerceAction } from '@/components/cart/ProductCommerceAction';
 import { QuickAddToCartButton } from '@/components/cart/QuickAddToCartButton';
+import { SafeProductImage } from '@/components/storefront/SafeProductImage';
 import { getProductDisplayPrice } from '@/modules/catalog/pricing';
 import { formatBrl } from '@/modules/cart/cart.utils';
 
@@ -98,31 +98,16 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
             {/* Coluna da Imagem */}
             <div className="lg:col-span-6 space-y-4">
               <div className="aspect-square rounded-2xl bg-tenant-surface border border-tenant-border/60 shadow-lg relative overflow-hidden flex items-center justify-center group">
-                {product.cover_image_url ? (
-                  <>
-                    <Image
-                      src={product.cover_image_url}
-                      alt={product.name}
-                      fill
-                      priority
-                      className="object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                      sizes="(max-width: 1024px) 100vw, 50vw"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
-                  </>
-                ) : (
-                  <div className="text-center space-y-2 p-8">
-                    <span className="text-xs uppercase tracking-widest text-tenant-secondary font-bold block">
-                      {product.category?.name || 'Prato Principal'}
-                    </span>
-                    <span className="font-heading text-2xl sm:text-3xl font-bold text-tenant-text block">
-                      {product.name}
-                    </span>
-                    <p className="text-xs text-tenant-muted pt-2">
-                      Fotografia oficial do prato em preparação
-                    </p>
-                  </div>
-                )}
+                <SafeProductImage
+                  src={product.cover_image_url}
+                  alt={product.name}
+                  categoryLabel={product.category?.name || 'Prato Principal'}
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  priority
+                  className="object-cover group-hover:scale-105 transition-transform duration-700 ease-out motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+                  overlayClassName="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none"
+                  fallbackSubtitle="Fotografia oficial do prato em preparação"
+                />
               </div>
             </div>
 
@@ -287,19 +272,13 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
                         href={`/produtos/${suggested.slug}`}
                         className="aspect-[16/10] bg-tenant-background relative flex items-center justify-center overflow-hidden border-b border-tenant-border/40"
                       >
-                        {suggested.cover_image_url ? (
-                          <Image
-                            src={suggested.cover_image_url}
-                            alt={suggested.name}
-                            fill
-                            className="object-cover"
-                            sizes="(max-width: 768px) 100vw, 33vw"
-                          />
-                        ) : (
-                          <span className="font-heading text-2xl font-bold text-tenant-primary/30">
-                            {suggested.name.charAt(0)}
-                          </span>
-                        )}
+                        <SafeProductImage
+                          src={suggested.cover_image_url}
+                          alt={suggested.name}
+                          categoryLabel={suggested.category?.name || 'Sugestão'}
+                          sizes="(max-width: 768px) 100vw, 33vw"
+                          className="object-cover"
+                        />
                       </Link>
                       <div className="p-4 flex-1 flex flex-col justify-between gap-3">
                         <div>

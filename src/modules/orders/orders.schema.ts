@@ -65,9 +65,20 @@ export const CreateOrderInputSchema = z
     }),
     scheduleType: z.enum(['asap', 'scheduled']).default('asap'),
     scheduledFor: z.string().datetime({ message: 'Data/hora de agendamento em formato ISO inválido' }).optional(),
+    scheduledWindow: z.string().trim().max(40).optional(),
     paymentMethod: z.enum(['pix', 'cash', 'card_on_delivery']).default('pix'),
     cashChangeForCents: z.number().int().nonnegative().optional(),
+    couponCode: z.string().trim().max(40).optional(),
     idempotencyKey: z.string().trim().max(100).optional(),
+    deliveryQuoteId: z.string().uuid('Identificador de cotação inválido').optional(),
+    checkoutSessionId: z.string().trim().max(120).optional(),
+    confirmedPin: z
+      .object({
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+      })
+      .nullable()
+      .optional(),
     address: OrderAddressSchema.optional(),
     notes: z.string().trim().max(500, 'Observações não podem exceder 500 caracteres').optional(),
   })

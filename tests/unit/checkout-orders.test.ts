@@ -338,6 +338,53 @@ describe('Etapa 2A & Fase B (B2) — Checkout Base, Estoque, Regras Comerciais e
       const result = CreateOrderInputSchema.safeParse(validScheduled);
       expect(result.success).toBe(true);
     });
+
+    it('deve rejeitar em createOrderAtomic agendamento para dia fechado ou janela inválida', async () => {
+      mockSupabaseState.businessHours = {
+        is_store_open: true,
+        enforce_schedule: true,
+        timezone: 'America/Sao_Paulo',
+        enabled_payment_methods: ['pix', 'cash', 'card_on_delivery'],
+        weekly_hours: {
+          sun: { open: '11:00', close: '21:00', closed: false },
+          mon: { open: '11:00', close: '19:00', closed: true },
+          tue: { open: '11:00', close: '19:00', closed: false },
+          wed: { open: '11:00', close: '22:00', closed: false },
+          thu: { open: '11:00', close: '22:00', closed: false },
+          fri: { open: '11:00', close: '22:00', closed: false },
+          sat: { open: '11:00', close: '22:00', closed: false },
+        },
+      };
+
+      // Calcula próxima segunda-feira futura
+      const now = new Date();
+      const daysUntilMon = ((8 - now.getUTCDay()) % 7) || 7;
+      const nextMon = new Date(now.getTime() + daysUntilMon * 86400000);
+      const monYmd = nextMon.toISOString().split('T')[0];
+
+      await expect(
+        createOrderAtomic(
+          TENANT_BENZA,
+          {
+            items: [
+              {
+                productId: '00000000-0000-0000-0000-000000000101',
+                variantId: 'var-01',
+                quantity: 1,
+                clientPriceInCents: 4800,
+              },
+            ],
+            customer: { name: 'Cliente Agendado', phone: '11999998888' },
+            fulfillmentType: 'pickup',
+            scheduleType: 'scheduled',
+            scheduledFor: `${monYmd}T14:30:00.000Z`,
+            scheduledWindow: '11:30 - 13:30',
+            paymentMethod: 'pix',
+          },
+          'commerce'
+        )
+      ).rejects.toThrow('não funciona');
+    });
   });
 
   describe('6. Bloqueio por Site Mode (prelaunch e institutional)', () => {

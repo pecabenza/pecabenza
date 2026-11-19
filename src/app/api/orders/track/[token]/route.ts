@@ -33,7 +33,11 @@ export async function GET(
       );
     }
 
-    const host = request.headers.get('x-tenant-host') || request.headers.get('host') || 'localhost:3000';
+    const host = request.headers.get('x-tenant-host') || request.headers.get('host') || '';
+    if (!host.trim()) {
+      return NextResponse.json({ error: 'Estabelecimento não identificado.' }, { status: 404 });
+    }
+
     let tenantContext = null;
     try {
       tenantContext = await resolveTenantByHost(host);
@@ -41,7 +45,14 @@ export async function GET(
       tenantContext = null;
     }
 
-    const trackingData = await getPublicOrderTracking(token, tenantContext?.tenant.id);
+    if (!tenantContext?.tenant?.id) {
+      logger.warn('Consulta de rastreio bloqueada: tenant não resolvido para o host', {
+        host,
+      });
+      return NextResponse.json({ error: 'Estabelecimento não identificado.' }, { status: 404 });
+    }
+
+    const trackingData = await getPublicOrderTracking(token, tenantContext.tenant.id);
 
     if (!trackingData) {
       logger.warn('Tentativa de consulta com token de rastreio inexistente', {

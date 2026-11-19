@@ -215,7 +215,7 @@ describe.skipIf(!isConfigured)(
       await updateOrderStatus(TENANT_BENZA, created.orderId, 'out_for_delivery', 'admin');
       await updateOrderStatus(TENANT_BENZA, created.orderId, 'delivered', 'admin');
 
-      const tracking = await getPublicOrderTracking(created.publicTrackingToken);
+      const tracking = await getPublicOrderTracking(created.publicTrackingToken, TENANT_BENZA);
       expect(tracking).not.toBeNull();
       expect(tracking?.status).toBe('delivered');
       expect(tracking?.paymentStatus).toBe('paid');

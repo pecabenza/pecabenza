@@ -57,7 +57,7 @@ const SaveStoreConfigSchema = z.object({
   }),
   paymentGateway: z
     .object({
-      provider: z.enum(['mock', 'asaas', 'mercadopago']),
+      provider: z.enum(['mock', 'asaas']),
       isActive: z.boolean(),
       pixEnabled: z.boolean(),
       pixExpirationMinutes: z.number().int().min(5).max(120),

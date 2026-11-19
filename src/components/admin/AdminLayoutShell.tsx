@@ -22,6 +22,7 @@ import {
   Menu,
   X,
   LogOut,
+  Ticket,
 } from 'lucide-react';
 import type { TenantRole } from '@/types/database.types';
 
@@ -62,6 +63,7 @@ export function AdminLayoutShell({
     { name: 'Configurações da Loja', href: '/admin/configuracoes/loja', icon: Store },
     { name: 'Estações & Fluxo', href: '/admin/configuracoes/operacao', icon: Layers },
     { name: 'Pedidos', href: '/admin/pedidos', icon: ShoppingBag },
+    { name: 'Cupons & Campanhas', href: '/admin/cupons', icon: Ticket },
     { name: 'Seções & CMS', href: '/admin/site', icon: Layers },
     { name: 'Cardápio & Pratos', href: '/admin/produtos', icon: UtensilsCrossed },
     { name: 'Estoque & Congelados', href: '/admin/estoque', icon: Package },
@@ -94,7 +96,7 @@ export function AdminLayoutShell({
               src={effectiveLogoUrl}
               alt={tenantName}
               onError={() => setLogoError(true)}
-              className="h-9 w-auto max-w-[160px] object-contain"
+              className="h-9 w-auto max-w-[160px] object-contain brightness-0 invert"
             />
           ) : (
             <span className="font-bold tracking-tight text-amber-500 font-heading text-lg">
@@ -128,7 +130,7 @@ export function AdminLayoutShell({
                   src={effectiveLogoUrl}
                   alt={tenantName}
                   onError={() => setLogoError(true)}
-                  className="h-14 w-auto max-w-[210px] object-contain"
+                  className="h-14 w-auto max-w-[210px] object-contain brightness-0 invert"
                 />
               ) : (
                 <span className="font-heading text-xl font-bold tracking-tight text-white block">

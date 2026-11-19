@@ -105,22 +105,70 @@ export async function POST(request: NextRequest) {
       error: error.message,
     });
 
+    const msg = String(error?.message || '');
+
+    // Erros estruturados de cotação de entrega devem retornar 400 (nunca 500)
+    const resolveQuoteErrorCode = (message: string): string | null => {
+      if (
+        message.includes('QUOTE_CART_MISMATCH') ||
+        message.includes('itens da sacola mudaram') ||
+        message.includes('Itens do carrinho divergentes')
+      ) {
+        return 'QUOTE_CART_MISMATCH';
+      }
+      if (
+        message.includes('QUOTE_ADDRESS_MISMATCH') ||
+        message.includes('endereço do pedido diverge') ||
+        message.includes('Endereço divergente')
+      ) {
+        return 'QUOTE_ADDRESS_MISMATCH';
+      }
+      if (message.includes('QUOTE_EXPIRED') || message.includes('expirou') || message.includes('expirada')) {
+        return 'QUOTE_EXPIRED';
+      }
+      if (message.includes('QUOTE_SESSION_MISMATCH') || message.includes('Sessão de checkout divergente')) {
+        return 'QUOTE_SESSION_MISMATCH';
+      }
+      if (message.includes('QUOTE_RULE_MISMATCH') || message.includes('Regras comerciais alteradas')) {
+        return 'QUOTE_RULE_MISMATCH';
+      }
+      if (message.includes('subtotal do pedido foi alterado')) {
+        return 'QUOTE_SUBTOTAL_MISMATCH';
+      }
+      if (message.includes('Cotação de entrega obrigatória')) {
+        return 'QUOTE_REQUIRED';
+      }
+      if (
+        message.includes('Cotação de entrega') ||
+        message.includes('Cotação já utilizada') ||
+        message.includes('QUOTE_')
+      ) {
+        return 'QUOTE_INVALID';
+      }
+      return null;
+    };
+
+    const quoteCode = resolveQuoteErrorCode(msg);
+    if (quoteCode) {
+      return NextResponse.json({ error: msg, code: quoteCode }, { status: 400 });
+    }
+
     // Se for erro de regra de negócio (ex: pedido mínimo, loja fechada, pagamento, estoque), retornar 400 amigável
     if (
-      error.message?.includes('mínimo') ||
-      error.message?.includes('esgotada') ||
-      error.message?.includes('atualizado') ||
-      error.message?.includes('indisponível') ||
-      error.message?.includes('agendamento') ||
-      error.message?.includes('fechada') ||
-      error.message?.includes('pausada') ||
-      error.message?.includes('horário') ||
-      error.message?.includes('pagamento') ||
-      error.message?.includes('estoque') ||
-      error.message?.includes('saldo') ||
-      error.message?.includes('desabilitados')
+      msg.includes('mínimo') ||
+      msg.includes('esgotada') ||
+      msg.includes('atualizado') ||
+      msg.includes('indisponível') ||
+      msg.includes('agendamento') ||
+      msg.includes('fechada') ||
+      msg.includes('pausada') ||
+      msg.includes('horário') ||
+      msg.includes('pagamento') ||
+      msg.includes('estoque') ||
+      msg.includes('saldo') ||
+      msg.includes('desabilitados')
     ) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ error: msg }, { status: 400 });
     }
 
     return createSafeErrorResponse(error, 500, {

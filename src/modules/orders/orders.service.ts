@@ -28,7 +28,15 @@ import {
   isValidPublicTrackingToken,
   toShortTrackingToken,
 } from './tracking-token';
-import { DEFAULT_DELIVERED_THANK_YOU_MESSAGE } from '@/modules/commerce/store-config.engine';
+import {
+  DEFAULT_DELIVERED_THANK_YOU_MESSAGE,
+  validateScheduledOrderSlot,
+} from '@/modules/commerce/store-config.engine';
+import {
+  computeCanonicalAddressHash,
+  computeCanonicalCartHash,
+  validateDeliveryQuoteBinding,
+} from '@/modules/delivery/delivery-pricing.engine';
 import {
   CanonicalOrderStatus,
   CanonicalPaymentStatus,
@@ -76,6 +84,11 @@ import {
   calculateDynamicDeliveryFee,
   type StorePaymentOption,
 } from '@/modules/commerce/store-config.engine';
+import {
+  evaluateCouponApplication,
+  normalizeCouponCode,
+  type CouponCampaign,
+} from '@/modules/commerce/coupon.engine';
 
 
 export interface ValidatedCartItem {
@@ -564,30 +577,121 @@ export async function createOrderAtomic(
     }
   }
 
-  const deliveryFeeCents = calculateDynamicDeliveryFee(
-    validation.subtotalInCents,
-    input.fulfillmentType,
-    settings
-  );
+  let deliveryFeeCents = 0;
+  let quoteRpcParams: Record<string, any> = {};
+  const pricingMode = ((settings as any).pricing_mode || 'fixed') as string;
+  const requiresLinkedDeliveryQuote =
+    input.fulfillmentType === 'delivery' &&
+    (pricingMode === 'distance' || pricingMode === 'distance_band');
 
-  // 6. Validar agendamento
+  if (requiresLinkedDeliveryQuote) {
+    if (!input.deliveryQuoteId) {
+      throw new Error('Cotação de entrega obrigatória não informada. Recalcule o frete antes de confirmar.');
+    }
+
+    const { data: quoteRow, error: quoteErr } = await supabase
+      .from('delivery_quotes')
+      .select(
+        'id, tenant_id, checkout_session_id, pricing_rule_version, address_hash, cart_hash, server_subtotal_cents, final_fee_cents, status, used_order_id, expires_at'
+      )
+      .eq('tenant_id', tenantId)
+      .eq('id', input.deliveryQuoteId)
+      .maybeSingle();
+
+    if (quoteErr || !quoteRow) {
+      throw new Error('Cotação de entrega não localizada para este estabelecimento.');
+    }
+
+    const expectedAddressHash = computeCanonicalAddressHash({
+      ...input.address!,
+      confirmedCoords: input.confirmedPin || null,
+    });
+    const expectedCartHash = computeCanonicalCartHash(input.items);
+    const expectedRuleVersion = Number((settings as any).pricing_rule_version || 1);
+
+    const bindingCheck = validateDeliveryQuoteBinding(
+      {
+        id: quoteRow.id,
+        tenantId: quoteRow.tenant_id,
+        status: quoteRow.status,
+        usedOrderId: quoteRow.used_order_id,
+        expiresAt: quoteRow.expires_at,
+        addressHash: quoteRow.address_hash,
+        cartHash: quoteRow.cart_hash,
+        pricingRuleVersion: quoteRow.pricing_rule_version,
+        finalFeeCents: quoteRow.final_fee_cents,
+      },
+      {
+        tenantId,
+        addressHash: expectedAddressHash,
+        cartHash: expectedCartHash,
+        pricingRuleVersion: expectedRuleVersion,
+      }
+    );
+    if (!bindingCheck.valid) {
+      throw new Error(bindingCheck.reason || 'Cotação de entrega inválida ou expirada.');
+    }
+
+    if (
+      quoteRow.checkout_session_id &&
+      quoteRow.checkout_session_id !== (input.checkoutSessionId || null)
+    ) {
+      throw new Error('Sessão de checkout divergente da cotação de entrega.');
+    }
+
+    if (Number(quoteRow.server_subtotal_cents) !== validation.subtotalInCents) {
+      throw new Error('O subtotal do pedido foi alterado após a cotação de entrega. Recalcule o frete.');
+    }
+
+    deliveryFeeCents = Number(quoteRow.final_fee_cents);
+    quoteRpcParams = {
+      p_delivery_quote_id: quoteRow.id,
+      p_quote_address_hash: expectedAddressHash,
+      p_quote_cart_hash: expectedCartHash,
+      p_quote_pricing_rule_version: expectedRuleVersion,
+      p_quote_checkout_session_id: input.checkoutSessionId || null,
+    };
+  } else {
+    deliveryFeeCents = calculateDynamicDeliveryFee(
+      validation.subtotalInCents,
+      input.fulfillmentType,
+      settings
+    );
+  }
+
+  // 6. Validar agendamento (autoridade no servidor: data, janela, fuso, dia aberto e modalidade)
   if (input.scheduleType === 'scheduled') {
-    if (!settings.scheduled_enabled) {
-      throw new Error('Pedidos agendados estão desabilitados no momento.');
-    }
-    if (!input.scheduledFor) {
-      throw new Error('Horário de agendamento não informado.');
-    }
-    const scheduledDate = new Date(input.scheduledFor);
-    if (isNaN(scheduledDate.getTime()) || scheduledDate.getTime() < Date.now() - 60000) {
-      throw new Error('O horário de agendamento não pode estar no passado.');
+    const slotCheck = validateScheduledOrderSlot(businessHours, settings, {
+      scheduledFor: input.scheduledFor,
+      scheduledWindow: input.scheduledWindow,
+      fulfillmentType: input.fulfillmentType,
+    });
+    if (!slotCheck.valid) {
+      throw new Error(slotCheck.reason || 'Horário de agendamento indisponível.');
     }
   } else if (!settings.asap_enabled) {
     throw new Error('Pedidos imediatos estão desabilitados no momento. Selecione agendamento.');
   }
 
   const subtotalCents = validation.subtotalInCents;
-  const totalCents = subtotalCents + deliveryFeeCents;
+
+  // 6b. Validação autoritativa de cupom de desconto (se informado no checkout)
+  let discountCents = 0;
+  let appliedCoupon: CouponCampaign | null = null;
+  if (input.couponCode && input.couponCode.trim()) {
+    const couponEval = evaluateCouponApplication(
+      businessHours.coupon_campaigns || [],
+      input.couponCode,
+      subtotalCents
+    );
+    if (!couponEval.valid || !couponEval.coupon) {
+      throw new Error(couponEval.error || 'Cupom de desconto inválido ou expirado.');
+    }
+    discountCents = couponEval.discountCents;
+    appliedCoupon = couponEval.coupon;
+  }
+
+  const totalCents = Math.max(0, subtotalCents + deliveryFeeCents - discountCents);
 
   // 7. Persistência atômica estrita via PostgreSQL RPC (nunca retorna sucesso fictício em falha)
   const orderItemsPayload = validation.validatedItems.map((item) => ({
@@ -616,7 +720,25 @@ export async function createOrderAtomic(
 
   let publicTrackingToken = generateShortTrackingToken();
 
-  const { data: rpcData, error: rpcError } = await supabase.rpc('create_order_atomic', {
+  const noteParts = [
+    input.notes?.trim(),
+    input.scheduleType === 'scheduled' && input.scheduledWindow
+      ? `[Janela agendada: ${input.scheduledWindow}]`
+      : null,
+    appliedCoupon
+      ? `[Cupom ${appliedCoupon.code}: -${formatBrl(discountCents)}]`
+      : null,
+  ].filter(Boolean);
+  const finalNotes = noteParts.length > 0 ? noteParts.join(' | ') : null;
+
+  const useDistanceQuoteRpc =
+    input.fulfillmentType === 'delivery' &&
+    (pricingMode === 'distance' || pricingMode === 'distance_band');
+  const rpcFunctionName = useDistanceQuoteRpc
+    ? 'create_order_with_delivery_quote_atomic'
+    : 'create_order_atomic';
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(rpcFunctionName, {
     p_tenant_id: tenantId,
     p_customer_name: input.customer.name,
     p_customer_phone: input.customer.phone,
@@ -626,12 +748,13 @@ export async function createOrderAtomic(
     p_scheduled_for: input.scheduledFor || null,
     p_subtotal_cents: subtotalCents,
     p_delivery_fee_cents: deliveryFeeCents,
-    p_discount_cents: 0,
+    p_discount_cents: discountCents,
     p_total_cents: totalCents,
     p_currency: 'BRL',
-    p_notes: input.notes || null,
+    p_notes: finalNotes,
     p_items: orderItemsPayload,
     p_address: orderAddressPayload,
+    ...(useDistanceQuoteRpc ? quoteRpcParams : {}),
   });
 
   if (rpcError) {
@@ -671,6 +794,29 @@ export async function createOrderAtomic(
 
   if (updatedWithToken?.public_tracking_token) {
     publicTrackingToken = updatedWithToken.public_tracking_token;
+  }
+
+  // Incrementa contador de uso da campanha de cupom aplicada
+  if (appliedCoupon && tenantSettingsRow?.business_hours) {
+    try {
+      const rawHours = tenantSettingsRow.business_hours as Record<string, unknown>;
+      const updatedCampaigns = (businessHours.coupon_campaigns || []).map((c) =>
+        normalizeCouponCode(c.code) === normalizeCouponCode(appliedCoupon!.code)
+          ? { ...c, usedCount: c.usedCount + 1 }
+          : c
+      );
+      await supabase
+        .from('tenant_settings')
+        .update({
+          business_hours: {
+            ...rawHours,
+            coupon_campaigns: updatedCampaigns,
+          },
+        })
+        .eq('tenant_id', tenantId);
+    } catch {
+      // não interrompe o pedido se a contagem falhar
+    }
   }
 
   // Registra evento inicial imutável em order_status_events
@@ -830,7 +976,11 @@ export async function updateOrderStatus(
 /**
  * Consulta pública e segura de acompanhamento de pedido (Sem vazamento de PII)
  */
-export async function getPublicOrderTracking(publicToken: string, tenantId?: string) {
+export async function getPublicOrderTracking(publicToken: string, tenantId: string) {
+  if (!tenantId || typeof tenantId !== 'string' || !tenantId.trim()) {
+    return null;
+  }
+
   if (!isValidPublicTrackingToken(publicToken)) {
     return null;
   }
@@ -856,10 +1006,11 @@ export async function getPublicOrderTracking(publicToken: string, tenantId?: str
       customer_phone
     `;
 
-  // 1. Busca pedido via token público seguro (exato ou prefixo curto de 10 chars para pedidos legados)
+  // 1. Busca pedido via token público seguro com isolamento estrito por tenant_id na query
   let { data: order, error: orderErr } = await supabase
     .from('orders')
     .select(selectCols)
+    .eq('tenant_id', tenantId)
     .eq('public_tracking_token', publicToken)
     .maybeSingle();
 
@@ -867,7 +1018,8 @@ export async function getPublicOrderTracking(publicToken: string, tenantId?: str
     try {
       const prefixQuery = supabase
         .from('orders')
-        .select(selectCols) as any;
+        .select(selectCols)
+        .eq('tenant_id', tenantId) as any;
       if (typeof prefixQuery?.ilike === 'function') {
         const fallback = await prefixQuery
           .ilike('public_tracking_token', `${publicToken}%`)
@@ -887,7 +1039,7 @@ export async function getPublicOrderTracking(publicToken: string, tenantId?: str
     return null;
   }
 
-  if (tenantId && order.tenant_id && order.tenant_id !== tenantId) {
+  if (order.tenant_id !== tenantId) {
     return null;
   }
 

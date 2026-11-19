@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { Instagram, Mail, Phone } from 'lucide-react';
+import { Instagram, Lock, Mail, Phone } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
 import type { Tenant, TenantSettings } from '@/types/database.types';
 
@@ -30,11 +30,11 @@ export function StorefrontFooter({ tenant, settings }: StorefrontFooterProps) {
               const rawHours = settings.business_hours as Record<string, unknown> | undefined;
               const descriptiveEntries = rawHours
                 ? Object.entries(rawHours).filter(
-                    ([key, val]) =>
-                      typeof val === 'string' &&
-                      val.trim().length > 0 &&
-                      !['timezone', 'pause_reason'].includes(key)
-                  )
+                  ([key, val]) =>
+                    typeof val === 'string' &&
+                    val.trim().length > 0 &&
+                    !['timezone', 'pause_reason'].includes(key)
+                )
                 : [];
               if (descriptiveEntries.length === 0) return null;
               const labelMap: Record<string, string> = {
@@ -135,9 +135,16 @@ export function StorefrontFooter({ tenant, settings }: StorefrontFooterProps) {
           <p>
             &copy; {currentYear} {tenant.name}. Todos os direitos reservados.
           </p>
-          <p className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center justify-center gap-4">
             <span>Pratos preparados e porcionados para o seu dia a dia.</span>
-          </p>
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/15 bg-white/5 text-white/75 hover:bg-white/10 hover:text-white transition-colors font-medium"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Entrar • Área Restrita</span>
+            </Link>
+          </div>
         </div>
       </Container>
     </footer>

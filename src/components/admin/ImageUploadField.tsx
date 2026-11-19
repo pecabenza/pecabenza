@@ -3,6 +3,10 @@
 import React, { useState, useRef } from 'react';
 import { UploadCloud, Image as ImageIcon, X, RefreshCw, Link as LinkIcon, Info } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import {
+  optimizeImageFileForUpload,
+  formatBytesCompact,
+} from '@/lib/media/client-image-optimizer';
 
 interface ImageUploadFieldProps {
   label: string;
@@ -31,6 +35,7 @@ export function ImageUploadField({
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [customUrl, setCustomUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [optimizationNote, setOptimizationNote] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isCurrentMockup = isMockup ?? (value ? value.includes('mockup') : false);
@@ -48,10 +53,12 @@ export function ImageUploadField({
 
     setIsUploading(true);
     setError(null);
+    setOptimizationNote(null);
 
     try {
+      const optimized = await optimizeImageFileForUpload(file, category);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', optimized.file);
       formData.append('category', category);
 
       const res = await fetch('/api/upload', {
@@ -62,6 +69,12 @@ export function ImageUploadField({
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Falha no upload.');
+      }
+
+      if (optimized.wasOptimized) {
+        setOptimizationNote(
+          `Imagem otimizada para WebP: ${formatBytesCompact(optimized.originalBytes)} → ${formatBytesCompact(optimized.optimizedBytes)}`
+        );
       }
 
       onChange(data.url);
@@ -222,6 +235,10 @@ export function ImageUploadField({
 
           {helperText && (
             <p className="text-[11px] text-stone-500 leading-relaxed">{helperText}</p>
+          )}
+
+          {optimizationNote && (
+            <p className="text-[11px] font-semibold text-emerald-700">{optimizationNote}</p>
           )}
 
           {isCurrentMockup && (

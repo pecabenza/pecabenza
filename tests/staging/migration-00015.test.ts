@@ -291,7 +291,7 @@ describe.skipIf(!isConfigured)(
         .single();
       if (!orderWithToken?.public_tracking_token) throw new Error('Token público do pedido ausente.');
 
-      const publicTrackActive = await getPublicOrderTracking(orderWithToken.public_tracking_token);
+      const publicTrackActive = await getPublicOrderTracking(orderWithToken.public_tracking_token, TENANT_BENZA);
       expect(publicTrackActive).not.toBeNull();
       expect(publicTrackActive?.delivery?.status).toBe('in_transit');
       expect(publicTrackActive?.delivery?.liveLocation).not.toBeNull();
@@ -324,7 +324,7 @@ describe.skipIf(!isConfigured)(
         }).valid
       ).toBe(false);
 
-      const publicTrackDone = await getPublicOrderTracking(orderWithToken.public_tracking_token);
+      const publicTrackDone = await getPublicOrderTracking(orderWithToken.public_tracking_token, TENANT_BENZA);
       expect(publicTrackDone?.delivery?.status).toBe('delivered');
       expect(publicTrackDone?.delivery?.liveLocation).toBeNull();
       expect(publicTrackDone?.delivery?.proofSummary?.recipientName).toBe('Sr. José Portaria');

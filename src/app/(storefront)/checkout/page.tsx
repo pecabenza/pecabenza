@@ -21,8 +21,10 @@ import {
   QrCode,
   Banknote,
   CreditCard,
+  MapPin,
 } from 'lucide-react';
 import { useCart, formatBrl } from '@/modules/cart/CartContext';
+import { LocationPinPicker } from '@/components/maps/LocationPinPicker';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -30,7 +32,14 @@ import { Button } from '@/components/ui/Button';
 import { trackEvent } from '@/lib/analytics/events';
 import {
   calculateDynamicDeliveryFee,
+  DEFAULT_SCHEDULE_WINDOWS,
+  getAvailableScheduleWindowsForDate,
+  parseStructuredBusinessHours,
+  zonedDateTimeToIso,
+  type DaySchedule,
+  type ScheduleWindowConfig,
   type StorePaymentOption,
+  type WeekdayKey,
 } from '@/modules/commerce/store-config.engine';
 
 interface ValidatedItem {
@@ -81,12 +90,18 @@ interface StoreConfigResponse {
     scheduledEnabled: boolean;
     estimatedDeliveryTimeMin: number;
     estimatedPickupTimeMin: number;
+    pricingMode?: 'fixed' | 'distance' | 'distance_band' | 'external_quote';
+    maxDeliveryDistanceKm?: number;
   };
   enabledPaymentMethods: StorePaymentOption[];
   businessHoursSummary?: {
     producao: string | null;
     entregas: string | null;
     enforceSchedule: boolean;
+    timezone?: string;
+    minScheduleLeadMinutes?: number;
+    scheduleWindows?: ScheduleWindowConfig[];
+    weeklyHours?: Record<WeekdayKey, DaySchedule>;
   };
 }
 
@@ -97,6 +112,7 @@ export default function CheckoutPage() {
   // Configurações comerciais reais do servidor
   const [storeConfig, setStoreConfig] = useState<StoreConfigResponse | null>(null);
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
 
   // Estados de revalidação server-side
   const [isValidating, setIsValidating] = useState(true);
@@ -136,12 +152,56 @@ export default function CheckoutPage() {
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledWindow, setScheduledWindow] = useState('11:30 - 13:30');
 
-  // Observações
+  // Observações e Cupom de Desconto
   const [notes, setNotes] = useState('');
+  const [couponInput, setCouponInput] = useState('');
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    code: string;
+    name: string;
+    discountCents: number;
+  } | null>(null);
 
   // Submissão
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Cotação inteligente de frete (usada apenas quando pricingMode === 'distance')
+  const [checkoutSessionId] = useState(() =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `chk-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  );
+  const [confirmedPin, setConfirmedPin] = useState<{ lat: number; lng: number } | null>(null);
+  const [pinAdjustedManually, setPinAdjustedManually] = useState(false);
+  const [deliveryQuote, setDeliveryQuote] = useState<{
+    quoteId: string | null;
+    expiresAt: string | null;
+    serverSubtotalCents: number;
+    addressHash: string;
+    cartHash: string;
+    ambiguousAddress: boolean;
+    destinationFormattedAddress?: string;
+    destinationPrecision?: string;
+    destinationCoords?: { lat: number; lng: number };
+    quote: {
+      eligible: boolean;
+      pricingMode: string;
+      deliveryFeeCents: number;
+      distanceKm?: number;
+      durationMin?: number;
+      isFreeDelivery?: boolean;
+      freeDeliveryThresholdCents?: number | null;
+      reason?: string;
+      errorCode?: string;
+      provider?: string;
+      usedNeighborhoodFallback?: boolean;
+      appliedRuleSummary?: string;
+    };
+  } | null>(null);
+  const [isQuotingDelivery, setIsQuotingDelivery] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
 
   // 1. Revalidação autoritativa do carrinho contra o servidor
   const revalidateCart = useCallback(async () => {
@@ -184,43 +244,48 @@ export default function CheckoutPage() {
     }
   }, [items]);
 
-  useEffect(() => {
-    let active = true;
-    async function loadStoreConfig() {
-      setIsLoadingConfig(true);
-      try {
-        const res = await fetch('/api/store/config', { cache: 'no-store' });
-        if (!res.ok) return;
-        const cfg: StoreConfigResponse = await res.json();
-        if (!active) return;
-        setStoreConfig(cfg);
-
-        if (!cfg.commerceSettings.deliveryEnabled && cfg.commerceSettings.pickupEnabled) {
-          setFulfillmentType('pickup');
-        } else if (cfg.commerceSettings.deliveryEnabled) {
-          setFulfillmentType('delivery');
-        }
-
-        if (!cfg.commerceSettings.asapEnabled && cfg.commerceSettings.scheduledEnabled) {
-          setScheduleType('scheduled');
-        } else if (!cfg.availability.open && cfg.availability.allowsScheduled && cfg.commerceSettings.scheduledEnabled) {
-          setScheduleType('scheduled');
-        }
-
-        if (cfg.enabledPaymentMethods.length > 0) {
-          setPaymentMethod(cfg.enabledPaymentMethods[0]);
-        }
-      } catch {
-        // Fallback gracioso mantendo valores de contingência seguros
-      } finally {
-        if (active) setIsLoadingConfig(false);
+  const loadStoreConfig = useCallback(async () => {
+    setIsLoadingConfig(true);
+    setConfigError(null);
+    try {
+      const res = await fetch('/api/store/config', { cache: 'no-store' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Não foi possível carregar as regras de atendimento da loja.');
       }
+      const cfg: StoreConfigResponse = await res.json();
+      setStoreConfig(cfg);
+
+      if (!cfg.commerceSettings.deliveryEnabled && cfg.commerceSettings.pickupEnabled) {
+        setFulfillmentType('pickup');
+      } else if (cfg.commerceSettings.deliveryEnabled) {
+        setFulfillmentType('delivery');
+      }
+
+      if (!cfg.commerceSettings.asapEnabled && cfg.commerceSettings.scheduledEnabled) {
+        setScheduleType('scheduled');
+      } else if (!cfg.availability.open && cfg.availability.allowsScheduled && cfg.commerceSettings.scheduledEnabled) {
+        setScheduleType('scheduled');
+      }
+
+      if (cfg.enabledPaymentMethods.length > 0) {
+        setPaymentMethod(cfg.enabledPaymentMethods[0]);
+      }
+    } catch (err: unknown) {
+      setStoreConfig(null);
+      setConfigError(
+        (err as { message?: string })?.message ||
+          'Erro de conexão ao consultar horários e formas de pagamento da loja.'
+      );
+    } finally {
+      setIsLoadingConfig(false);
     }
-    loadStoreConfig();
-    return () => {
-      active = false;
-    };
   }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => void loadStoreConfig(), 0);
+    return () => clearTimeout(t);
+  }, [loadStoreConfig]);
 
   useEffect(() => {
     revalidateCart();
@@ -261,12 +326,202 @@ export default function CheckoutPage() {
     scheduledEnabled: true,
     estimatedDeliveryTimeMin: 45,
     estimatedPickupTimeMin: 30,
+    pricingMode: 'fixed' as const,
   };
-  const deliveryFeeCents = calculateDynamicDeliveryFee(subtotalCents, fulfillmentType, {
-    fixed_delivery_fee_cents: effectiveSettings.fixedDeliveryFeeCents,
-    free_delivery_threshold_cents: effectiveSettings.freeDeliveryThresholdCents,
-  });
-  const totalCents = subtotalCents + deliveryFeeCents;
+  const pricingMode = effectiveSettings.pricingMode || 'fixed';
+  const isDistanceDelivery =
+    (pricingMode === 'distance' || pricingMode === 'distance_band') &&
+    fulfillmentType === 'delivery';
+  const cleanCepDigits = zipCode.replace(/\D/g, '');
+  const hasCompleteAddress =
+    cleanCepDigits.length === 8 &&
+    street.trim().length >= 2 &&
+    number.trim().length >= 1 &&
+    neighborhood.trim().length >= 2 &&
+    city.trim().length >= 2 &&
+    state.trim().length === 2;
+  const addressSignature = `${cleanCepDigits}|${street.trim()}|${number.trim()}|${complement.trim()}|${neighborhood.trim()}|${city.trim()}|${state.trim().toUpperCase()}`;
+  const cartSignature = JSON.stringify(
+    items.map((i) => ({
+      productId: i.productId,
+      variantId: i.variantId,
+      quantity: i.quantity,
+      selectedModifierOptionIds: (i.selectedModifiers || []).map((m) => m.optionId),
+    }))
+  );
+
+  // Invalida pino e cotação ao alterar endereço
+  useEffect(() => {
+    setConfirmedPin(null);
+    setPinAdjustedManually(false);
+    setDeliveryQuote(null);
+    setQuoteError(null);
+  }, [addressSignature]);
+
+  // Invalida cotação ao alterar sacola ou modalidade
+  useEffect(() => {
+    setDeliveryQuote(null);
+    setQuoteError(null);
+  }, [cartSignature, fulfillmentType]);
+
+  // Recalcula cotação de frete no servidor quando pricingMode === 'distance'
+  useEffect(() => {
+    if (!isDistanceDelivery || !hasCompleteAddress || items.length === 0) {
+      setIsQuotingDelivery(false);
+      return;
+    }
+    if (isValidating || validationError || !validationData || validationData.hasUnavailableItems) {
+      return;
+    }
+
+    let active = true;
+    const timer = setTimeout(async () => {
+      setIsQuotingDelivery(true);
+      setQuoteError(null);
+      try {
+        const res = await fetch('/api/checkout/delivery-quote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fulfillmentType,
+            items: items.map((i) => ({
+              productId: i.productId,
+              variantId: i.variantId,
+              quantity: i.quantity,
+              clientPriceInCents: i.unitPriceInCents,
+              selectedModifierOptionIds: (i.selectedModifiers || []).map((m) => m.optionId),
+            })),
+            address: {
+              zipCode: zipCode.trim(),
+              street: street.trim(),
+              number: number.trim(),
+              complement: complement.trim() || undefined,
+              neighborhood: neighborhood.trim(),
+              city: city.trim(),
+              state: state.trim().toUpperCase(),
+              reference: reference.trim() || undefined,
+            },
+            confirmedPin: confirmedPin ?? undefined,
+            checkoutSessionId,
+          }),
+        });
+        const data = await res.json();
+        if (!active) return;
+
+        if (!res.ok) {
+          setDeliveryQuote(null);
+          setQuoteError(data?.error || 'Não foi possível calcular a entrega para este endereço.');
+          return;
+        }
+
+        setDeliveryQuote(data);
+        if (!data.quote?.eligible) {
+          setQuoteError(data.quote?.reason || 'Endereço fora da área de entrega.');
+        }
+      } catch {
+        if (!active) return;
+        setDeliveryQuote(null);
+        setQuoteError('Erro de conexão ao calcular a taxa de entrega.');
+      } finally {
+        if (active) setIsQuotingDelivery(false);
+      }
+    }, 450);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [
+    isDistanceDelivery,
+    hasCompleteAddress,
+    addressSignature,
+    cartSignature,
+    confirmedPin,
+    checkoutSessionId,
+    isValidating,
+    validationError,
+    validationData,
+  ]);
+
+  const deliveryFeeCents = isDistanceDelivery
+    ? deliveryQuote?.quote?.eligible
+      ? deliveryQuote.quote.deliveryFeeCents
+      : 0
+    : calculateDynamicDeliveryFee(subtotalCents, fulfillmentType, {
+        fixed_delivery_fee_cents: effectiveSettings.fixedDeliveryFeeCents,
+        free_delivery_threshold_cents: effectiveSettings.freeDeliveryThresholdCents,
+      });
+  const discountCents = appliedCoupon ? Math.min(subtotalCents, appliedCoupon.discountCents) : 0;
+  const totalCents = Math.max(0, subtotalCents + deliveryFeeCents - discountCents);
+
+  const appliedCouponCode = appliedCoupon?.code;
+
+  // Revalida o cupom automaticamente sempre que o subtotal dos itens mudar
+  useEffect(() => {
+    if (!appliedCouponCode || subtotalCents <= 0) return;
+    let active = true;
+    fetch('/api/checkout/coupon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: appliedCouponCode,
+        subtotalInCents: subtotalCents,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        if (!data.valid) {
+          setAppliedCoupon(null);
+          setCouponError(data.error || 'Cupom removido após alteração da sacola.');
+        } else {
+          setAppliedCoupon((prev) =>
+            prev ? { ...prev, discountCents: data.discountCents } : null
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [appliedCouponCode, subtotalCents]);
+
+  const handleApplyCoupon = async () => {
+    const clean = couponInput.trim().toUpperCase();
+    if (!clean) {
+      setCouponError('Digite o código do cupom.');
+      return;
+    }
+    setIsApplyingCoupon(true);
+    setCouponError(null);
+    try {
+      const res = await fetch('/api/checkout/coupon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: clean,
+          subtotalInCents: subtotalCents,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.valid) {
+        setAppliedCoupon(null);
+        setCouponError(data.error || 'Cupom inválido ou expirado.');
+        return;
+      }
+      setAppliedCoupon({
+        code: data.code,
+        name: data.name,
+        discountCents: data.discountCents,
+      });
+      setCouponInput(data.code);
+      trackEvent('coupon_apply', { code: data.code, discountCents: data.discountCents });
+    } catch {
+      setCouponError('Erro de conexão ao validar cupom.');
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
 
   const isStoreCommerce = !storeConfig || storeConfig.siteMode === 'commerce';
   const isStoreOpenNow = storeConfig ? storeConfig.availability.open : true;
@@ -285,6 +540,16 @@ export default function CheckoutPage() {
   const handleConfirmOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+
+    if (!storeConfig || configError) {
+      setSubmitError(configError || 'Não foi possível carregar as configurações da loja.');
+      return;
+    }
+
+    if (isValidating || validationError || !validationData) {
+      setSubmitError(validationError || 'Aguarde a validação dos itens no servidor antes de confirmar.');
+      return;
+    }
 
     if (!isStoreCommerce) {
       setSubmitError(storeConfig?.availability.reason || 'A loja não está recebendo pedidos online no momento.');
@@ -308,6 +573,25 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (isDistanceDelivery) {
+      if (isQuotingDelivery) {
+        setSubmitError('Aguarde o cálculo da taxa de entrega antes de confirmar.');
+        return;
+      }
+      if (quoteError || !deliveryQuote || !deliveryQuote.quote?.eligible || !deliveryQuote.quoteId) {
+        setSubmitError(
+          quoteError ||
+            deliveryQuote?.quote?.reason ||
+            'Não foi possível validar a entrega para o endereço informado.'
+        );
+        return;
+      }
+      if (deliveryQuote.ambiguousAddress && !pinAdjustedManually) {
+        setSubmitError('Confirme o local exato de entrega no mapa antes de finalizar.');
+        return;
+      }
+    }
+
     // Validações client-side prévias
     if (!customerName.trim() || customerName.trim().length < 2) {
       setSubmitError('Por favor, informe seu nome completo.');
@@ -320,6 +604,11 @@ export default function CheckoutPage() {
     }
 
     if (fulfillmentType === 'delivery') {
+      const cleanZip = zipCode.replace(/\D/g, '');
+      if (cleanZip.length !== 8) {
+        setSubmitError('Por favor, informe um CEP válido com 8 dígitos.');
+        return;
+      }
       if (!street.trim() || !number.trim() || !neighborhood.trim() || !city.trim() || !state.trim()) {
         setSubmitError('Por favor, preencha todos os campos obrigatórios do endereço de entrega.');
         return;
@@ -351,10 +640,34 @@ export default function CheckoutPage() {
     setIsSubmitting(true);
 
     try {
-      const scheduledIso =
-        scheduleType === 'scheduled' && scheduledDate
-          ? new Date(`${scheduledDate}T12:00:00Z`).toISOString()
-          : undefined;
+      let scheduledIso: string | undefined;
+      let resolvedScheduledWindow: string | undefined;
+      if (scheduleType === 'scheduled' && scheduledDate) {
+        const summary = storeConfig?.businessHoursSummary;
+        const configured = summary?.scheduleWindows || DEFAULT_SCHEDULE_WINDOWS;
+        const structured = parseStructuredBusinessHours({
+          timezone: summary?.timezone,
+          weekly_hours: summary?.weeklyHours,
+          schedule_windows: configured,
+        });
+        const availableWindows = getAvailableScheduleWindowsForDate(
+          structured,
+          scheduledDate,
+          fulfillmentType
+        );
+        if (availableWindows.length === 0) {
+          setSubmitError('Não há janelas disponíveis para a data e modalidade selecionadas.');
+          setIsSubmitting(false);
+          return;
+        }
+        resolvedScheduledWindow = availableWindows.some((w) => w.value === scheduledWindow)
+          ? scheduledWindow
+          : availableWindows[0].value;
+        const startMatch = resolvedScheduledWindow.match(/^(\d{2}:\d{2})/);
+        const startTime = startMatch ? startMatch[1] : '11:30';
+        const storeTimezone = summary?.timezone || 'America/Sao_Paulo';
+        scheduledIso = zonedDateTimeToIso(scheduledDate, startTime, storeTimezone);
+      }
 
       const orderPayload = {
         items: items.map((i) => ({
@@ -372,9 +685,16 @@ export default function CheckoutPage() {
         fulfillmentType,
         scheduleType,
         scheduledFor: scheduledIso,
+        scheduledWindow: scheduleType === 'scheduled' ? resolvedScheduledWindow : undefined,
         paymentMethod,
         cashChangeForCents: parsedCashChangeCents,
+        couponCode: appliedCoupon?.code || undefined,
         idempotencyKey,
+        deliveryQuoteId:
+          isDistanceDelivery && deliveryQuote?.quoteId ? deliveryQuote.quoteId : undefined,
+        checkoutSessionId: isDistanceDelivery ? checkoutSessionId : undefined,
+        confirmedPin:
+          isDistanceDelivery && confirmedPin ? confirmedPin : undefined,
         address:
           fulfillmentType === 'delivery'
             ? {
@@ -761,6 +1081,94 @@ export default function CheckoutPage() {
                         className="w-full px-3 py-2 rounded-tenant bg-tenant-background border border-tenant-border text-sm text-tenant-text focus:outline-hidden focus:ring-2 focus:ring-tenant-primary"
                       />
                     </div>
+
+                    {isDistanceDelivery && (
+                      <div className="space-y-3 pt-2 border-t border-tenant-border/40">
+                        {!hasCompleteAddress && (
+                          <div className="p-3 rounded-xl bg-tenant-background border border-tenant-border text-xs text-tenant-muted flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-tenant-primary shrink-0" />
+                            <span>
+                              Preencha CEP, rua, número, bairro, cidade e UF para calcular a taxa de entrega.
+                            </span>
+                          </div>
+                        )}
+
+                        {hasCompleteAddress && isQuotingDelivery && (
+                          <div className="p-3 rounded-xl bg-tenant-background border border-tenant-border text-xs text-tenant-muted flex items-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-tenant-primary shrink-0" />
+                            <span>Calculando rota e taxa de entrega...</span>
+                          </div>
+                        )}
+
+                        {hasCompleteAddress && !isQuotingDelivery && quoteError && (
+                          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>{quoteError}</span>
+                          </div>
+                        )}
+
+                        {hasCompleteAddress &&
+                          !isQuotingDelivery &&
+                          deliveryQuote?.quote?.eligible && (
+                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs space-y-1">
+                              <div className="flex items-center justify-between gap-2 font-bold text-emerald-800 dark:text-emerald-300">
+                                <span className="flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                                  {deliveryQuote.quote.usedNeighborhoodFallback
+                                    ? 'Entrega disponível (tarifa por bairro)'
+                                    : 'Entrega disponível para este endereço'}
+                                </span>
+                                <span>
+                                  {deliveryQuote.quote.deliveryFeeCents === 0
+                                    ? 'Grátis'
+                                    : formatBrl(deliveryQuote.quote.deliveryFeeCents)}
+                                </span>
+                              </div>
+                              {(deliveryQuote.quote.distanceKm !== undefined ||
+                                deliveryQuote.quote.durationMin !== undefined) && (
+                                <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                                  {deliveryQuote.quote.distanceKm !== undefined
+                                    ? `Distância estimada: ${deliveryQuote.quote.distanceKm.toFixed(1)} km`
+                                    : ''}
+                                  {deliveryQuote.quote.durationMin !== undefined
+                                    ? ` (~${Math.round(deliveryQuote.quote.durationMin)} min de trajeto)`
+                                    : ''}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                        {deliveryQuote?.destinationCoords && (
+                          <div className="space-y-2">
+                            {deliveryQuote.ambiguousAddress && !pinAdjustedManually && (
+                              <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                <span>
+                                  Endereço aproximado. Ajuste o pino se necessário e clique em{' '}
+                                  <strong>Confirmar local</strong> no mapa.
+                                </span>
+                              </div>
+                            )}
+                            <LocationPinPicker
+                              initialCoords={confirmedPin || deliveryQuote.destinationCoords}
+                              addressLabel={
+                                deliveryQuote.destinationFormattedAddress ||
+                                `${street}, ${number} - ${neighborhood}`
+                              }
+                              confirmed={pinAdjustedManually || !deliveryQuote.ambiguousAddress}
+                              onChangeCoords={(coords) => {
+                                setConfirmedPin(coords);
+                                setPinAdjustedManually(false);
+                              }}
+                              onConfirm={(coords) => {
+                                setConfirmedPin(coords);
+                                setPinAdjustedManually(true);
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="p-4 rounded-xl bg-tenant-background border border-tenant-border/60 text-xs text-tenant-muted space-y-1">
@@ -857,15 +1265,40 @@ export default function CheckoutPage() {
                       <label className="block text-xs font-medium text-tenant-muted mb-1">
                         Janela Horária *
                       </label>
-                      <select
-                        value={scheduledWindow}
-                        onChange={(e) => setScheduledWindow(e.target.value)}
-                        className="w-full px-3 py-2 rounded-tenant bg-tenant-background border border-tenant-border text-sm text-tenant-text focus:outline-hidden focus:ring-2 focus:ring-tenant-primary"
-                      >
-                        <option value="11:30 - 13:30">Manhã / Almoço (11:30 às 13:30)</option>
-                        <option value="15:00 - 18:00">Tarde (15:00 às 18:00)</option>
-                        <option value="18:30 - 21:00">Noite (18:30 às 21:00)</option>
-                      </select>
+                      {(() => {
+                        const summary = storeConfig?.businessHoursSummary;
+                        const configured = summary?.scheduleWindows || DEFAULT_SCHEDULE_WINDOWS;
+                        const structured = parseStructuredBusinessHours({
+                          timezone: summary?.timezone,
+                          weekly_hours: summary?.weeklyHours,
+                          schedule_windows: configured,
+                        });
+                        const windows = scheduledDate
+                          ? getAvailableScheduleWindowsForDate(structured, scheduledDate, fulfillmentType)
+                          : configured.filter((w) => !w.fulfillmentTypes || w.fulfillmentTypes.includes(fulfillmentType));
+
+                        if (scheduledDate && windows.length === 0) {
+                          return (
+                            <div className="px-3 py-2 rounded-tenant bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+                              Sem janelas disponíveis para este dia. Escolha outra data.
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <select
+                            value={windows.some((w) => w.value === scheduledWindow) ? scheduledWindow : (windows[0]?.value || '')}
+                            onChange={(e) => setScheduledWindow(e.target.value)}
+                            className="w-full px-3 py-2 rounded-tenant bg-tenant-background border border-tenant-border text-sm text-tenant-text focus:outline-hidden focus:ring-2 focus:ring-tenant-primary"
+                          >
+                            {windows.map((w) => (
+                              <option key={w.value} value={w.value}>
+                                {w.label}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
@@ -1020,8 +1453,19 @@ export default function CheckoutPage() {
 
               {/* Lista de Itens com Controles */}
               <div className="divide-y divide-tenant-border/40 max-h-[360px] overflow-y-auto space-y-3 pr-1">
-                {(validationData?.validatedItems || items).map((item) => (
-                  <div key={item.variantId} className="pt-3 first:pt-0 flex gap-3">
+                {(validationData?.validatedItems || items).map((item, idx) => {
+                  const cartLine = items[idx];
+                  const lineKey =
+                    ('itemKey' in item && typeof item.itemKey === 'string' && item.itemKey) ||
+                    cartLine?.itemKey ||
+                    item.variantId;
+                  const modifiers =
+                    ('selectedModifiers' in item && Array.isArray(item.selectedModifiers)
+                      ? item.selectedModifiers
+                      : cartLine?.selectedModifiers) || [];
+
+                  return (
+                  <div key={lineKey} className="pt-3 first:pt-0 flex gap-3">
                     <div className="w-14 h-14 rounded-lg bg-tenant-background border border-tenant-border relative overflow-hidden shrink-0 flex items-center justify-center">
                       {item.coverImageUrl ? (
                         <Image
@@ -1045,7 +1489,7 @@ export default function CheckoutPage() {
                         </h4>
                         <button
                           type="button"
-                          onClick={() => removeItem(item.variantId)}
+                          onClick={() => removeItem(lineKey)}
                           className="text-stone-400 hover:text-red-600 p-0.5 transition-colors"
                           title="Remover prato"
                         >
@@ -1053,7 +1497,7 @@ export default function CheckoutPage() {
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <Badge variant="neutral" className="text-[10px] py-0 px-1.5">
                           {item.variantName}
                         </Badge>
@@ -1061,12 +1505,17 @@ export default function CheckoutPage() {
                           {formatBrl(item.unitPriceInCents)} un.
                         </span>
                       </div>
+                      {modifiers.length > 0 && (
+                        <span className="text-[10px] text-emerald-700 block mt-0.5">
+                          + {modifiers.map((m) => m.optionName).join(', ')}
+                        </span>
+                      )}
 
                       <div className="flex items-center justify-between pt-2 mt-1">
                         <div className="flex items-center gap-1.5 bg-tenant-background border border-tenant-border rounded-lg px-2 py-0.5">
                           <button
                             type="button"
-                            onClick={() => updateQuantity(item.variantId, item.quantity - 1)}
+                            onClick={() => updateQuantity(lineKey, item.quantity - 1)}
                             className="text-tenant-text hover:text-tenant-primary transition-colors p-0.5"
                           >
                             <Minus className="w-3 h-3" />
@@ -1076,7 +1525,7 @@ export default function CheckoutPage() {
                           </span>
                           <button
                             type="button"
-                            onClick={() => updateQuantity(item.variantId, item.quantity + 1)}
+                            onClick={() => updateQuantity(lineKey, item.quantity + 1)}
                             className="text-tenant-text hover:text-tenant-primary transition-colors p-0.5"
                           >
                             <Plus className="w-3 h-3" />
@@ -1089,7 +1538,63 @@ export default function CheckoutPage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
+              </div>
+
+              {/* Cupom de Desconto */}
+              <div className="pt-3 border-t border-tenant-border/50 space-y-2">
+                <label htmlFor="checkout-coupon-input" className="block text-xs font-bold text-tenant-text">
+                  Cupom de Desconto
+                </label>
+                {appliedCoupon ? (
+                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs">
+                    <div className="min-w-0">
+                      <span className="font-extrabold text-emerald-800 block">
+                        {appliedCoupon.code} aplicado (-{formatBrl(discountCents)})
+                      </span>
+                      <span className="text-[11px] text-emerald-700 truncate block">
+                        {appliedCoupon.name}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppliedCoupon(null);
+                        setCouponInput('');
+                        setCouponError(null);
+                      }}
+                      className="text-xs font-bold text-red-600 hover:underline shrink-0"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="checkout-coupon-input"
+                      type="text"
+                      value={couponInput}
+                      onChange={(e) => {
+                        setCouponInput(e.target.value.toUpperCase());
+                        if (couponError) setCouponError(null);
+                      }}
+                      placeholder="Ex: BENZA10"
+                      className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-tenant-border bg-tenant-background text-xs font-mono uppercase text-tenant-text focus:outline-none focus:ring-2 focus:ring-tenant-primary"
+                    />
+                    <button
+                      type="button"
+                      disabled={isApplyingCoupon || !couponInput.trim() || subtotalCents <= 0}
+                      onClick={handleApplyCoupon}
+                      className="px-3.5 py-2 rounded-lg bg-tenant-surface border border-tenant-border hover:border-tenant-primary text-xs font-bold text-tenant-text disabled:opacity-50 shrink-0"
+                    >
+                      {isApplyingCoupon ? 'Validando...' : 'Aplicar'}
+                    </button>
+                  </div>
+                )}
+                {couponError && (
+                  <p className="text-[11px] text-red-600 font-medium">{couponError}</p>
+                )}
               </div>
 
               {/* Subtotal, Frete e Total */}
@@ -1101,10 +1606,44 @@ export default function CheckoutPage() {
                   </span>
                 </div>
 
+                {discountCents > 0 && (
+                  <div className="flex items-center justify-between text-emerald-700 text-xs font-semibold">
+                    <span>Desconto ({appliedCoupon?.code})</span>
+                    <span>- {formatBrl(discountCents)}</span>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between text-tenant-muted text-xs">
-                  <span>Taxa de {fulfillmentType === 'delivery' ? 'entrega' : 'retirada'}</span>
-                  <span className={deliveryFeeCents === 0 ? 'text-emerald-600 font-semibold' : 'text-tenant-text font-semibold'}>
-                    {deliveryFeeCents > 0 ? formatBrl(deliveryFeeCents) : 'Grátis'}
+                  <span>
+                    Taxa de {fulfillmentType === 'delivery' ? 'entrega' : 'retirada'}
+                    {isDistanceDelivery &&
+                    deliveryQuote?.quote?.eligible &&
+                    deliveryQuote.quote.distanceKm !== undefined
+                      ? ` (${deliveryQuote.quote.distanceKm.toFixed(1)} km)`
+                      : ''}
+                  </span>
+                  <span
+                    className={
+                      isDistanceDelivery && (!hasCompleteAddress || isQuotingDelivery)
+                        ? 'text-tenant-muted font-semibold'
+                        : deliveryFeeCents === 0
+                        ? 'text-emerald-600 font-semibold'
+                        : 'text-tenant-text font-semibold'
+                    }
+                  >
+                    {isDistanceDelivery
+                      ? !hasCompleteAddress
+                        ? 'A calcular'
+                        : isQuotingDelivery
+                        ? 'Calculando...'
+                        : deliveryQuote?.quote?.eligible
+                        ? deliveryFeeCents > 0
+                          ? formatBrl(deliveryFeeCents)
+                          : 'Grátis'
+                        : 'Indisponível'
+                      : deliveryFeeCents > 0
+                      ? formatBrl(deliveryFeeCents)
+                      : 'Grátis'}
                   </span>
                 </div>
 
@@ -1149,7 +1688,20 @@ export default function CheckoutPage() {
                 </div>
               )}
 
-              {/* Erros de Validação ou Submissão */}
+              {/* Erros de Configuração, Validação ou Submissão */}
+              {configError && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs flex items-center justify-between gap-2">
+                  <span>{configError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void loadStoreConfig()}
+                    className="font-bold underline shrink-0"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              )}
+
               {(validationError || submitError) && (
                 <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs flex gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -1165,10 +1717,21 @@ export default function CheckoutPage() {
                   isSubmitting ||
                   isValidating ||
                   isLoadingConfig ||
+                  !storeConfig ||
+                  Boolean(configError) ||
+                  Boolean(validationError) ||
+                  !validationData ||
                   items.length === 0 ||
                   isBlockedByStoreAvailability ||
                   isBelowMinOrder ||
-                  Boolean(validationData?.hasUnavailableItems)
+                  Boolean(validationData?.hasUnavailableItems) ||
+                  (isDistanceDelivery &&
+                    (isQuotingDelivery ||
+                      !deliveryQuote ||
+                      !deliveryQuote.quote?.eligible ||
+                      !deliveryQuote.quoteId ||
+                      Boolean(quoteError) ||
+                      (deliveryQuote.ambiguousAddress && !pinAdjustedManually)))
                 }
                 className="w-full py-4 text-sm uppercase tracking-wider font-bold gap-2 rounded-xl shadow-md bg-tenant-primary text-white hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50"
               >
