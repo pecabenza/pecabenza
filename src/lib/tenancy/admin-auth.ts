@@ -58,16 +58,16 @@ export async function getAdminAuthSession(req?: Request): Promise<AdminAuthSessi
     return null;
   }
 
-  // Verificar associação na tabela tenant_members com privilégio de admin
+  // Verificar associação na tabela tenant_members com privilégio de admin ativo
   const adminClient = createAdminClient();
   const { data: member, error: memberError } = await adminClient
     .from('tenant_members')
-    .select('role')
+    .select('role, is_active')
     .eq('tenant_id', tenantContext.tenant.id)
     .eq('user_id', user.id)
     .maybeSingle();
 
-  if (memberError || !member) {
+  if (memberError || !member || member.is_active === false) {
     return null;
   }
 

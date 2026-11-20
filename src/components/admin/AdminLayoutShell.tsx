@@ -23,6 +23,7 @@ import {
   X,
   LogOut,
   Ticket,
+  Users,
 } from 'lucide-react';
 import type { TenantRole } from '@/types/database.types';
 
@@ -62,6 +63,7 @@ export function AdminLayoutShell({
     { name: 'Entregadores', href: '/admin/entregadores', icon: Bike },
     { name: 'Configurações da Loja', href: '/admin/configuracoes/loja', icon: Store },
     { name: 'Estações & Fluxo', href: '/admin/configuracoes/operacao', icon: Layers },
+    { name: 'Usuários & Senha', href: '/admin/usuarios', icon: Users },
     { name: 'Pedidos', href: '/admin/pedidos', icon: ShoppingBag },
     { name: 'Cupons & Campanhas', href: '/admin/cupons', icon: Ticket },
     { name: 'Seções & CMS', href: '/admin/site', icon: Layers },

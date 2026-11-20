@@ -488,20 +488,30 @@ export async function createOrderAtomic(
     throw new Error(getCommerceDisabledMessage(siteMode));
   }
 
-  // 2. Revalidação estrita do carrinho (Servidor é a única autoridade de preços e itens)
-  const validation = await validateCartItems(tenantId, input.items);
+  // 2 e 3. Paralelizar revalidação do carrinho, configurações, horários e checagem de idempotência
+  const supabase = createAdminClient();
+  const cleanIdempotencyKey = input.idempotencyKey?.trim() || null;
+
+  const [validation, settings, { data: tenantSettingsRow }, existingIdempRes] = await Promise.all([
+    validateCartItems(tenantId, input.items),
+    getTenantCommerceSettings(tenantId),
+    supabase.from('tenant_settings').select('business_hours').eq('tenant_id', tenantId).maybeSingle(),
+    cleanIdempotencyKey
+      ? supabase
+          .from('orders')
+          .select(
+            'id, order_number, public_tracking_token, subtotal_cents, delivery_fee_cents, total_cents, fulfillment_type, payment_method, cash_change_for_cents, scheduled_for'
+          )
+          .eq('tenant_id', tenantId)
+          .eq('idempotency_key', cleanIdempotencyKey)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
   if (!validation.isValid) {
     const errorMsg = validation.issues.map((i) => i.message).join(' | ');
     throw new Error(`Não foi possível confirmar o pedido: ${errorMsg}`);
   }
-
-  // 3. Buscar configurações comerciais e horários do tenant
-  const supabase = createAdminClient();
-  const [settings, { data: tenantSettingsRow }] = await Promise.all([
-    getTenantCommerceSettings(tenantId),
-    supabase.from('tenant_settings').select('business_hours').eq('tenant_id', tenantId).maybeSingle(),
-  ]);
 
   const businessHours = parseStructuredBusinessHours(tenantSettingsRow?.business_hours as any);
 
@@ -523,16 +533,8 @@ export async function createOrderAtomic(
   }
 
   // 3.3 Idempotência por chave do cliente (evita pedidos duplicados por clique duplo)
-  const cleanIdempotencyKey = input.idempotencyKey?.trim() || null;
   if (cleanIdempotencyKey) {
-    const { data: existingOrder } = await supabase
-      .from('orders')
-      .select(
-        'id, order_number, public_tracking_token, subtotal_cents, delivery_fee_cents, total_cents, fulfillment_type, payment_method, cash_change_for_cents, scheduled_for'
-      )
-      .eq('tenant_id', tenantId)
-      .eq('idempotency_key', cleanIdempotencyKey)
-      .maybeSingle();
+    const existingOrder = existingIdempRes?.data;
 
     if (existingOrder?.id) {
       return {
@@ -783,13 +785,28 @@ export async function createOrderAtomic(
     updateOrderPayload.idempotency_key = cleanIdempotencyKey;
   }
 
-  const { data: updatedWithToken, error: updErr } = await supabase
-    .from('orders')
-    .update(updateOrderPayload)
-    .eq('tenant_id', tenantId)
-    .eq('id', orderId)
-    .select('public_tracking_token')
-    .maybeSingle();
+  const [{ data: updatedWithToken, error: updErr }] = await Promise.all([
+    supabase
+      .from('orders')
+      .update(updateOrderPayload)
+      .eq('tenant_id', tenantId)
+      .eq('id', orderId)
+      .select('public_tracking_token')
+      .maybeSingle(),
+    supabase.from('order_status_events').insert({
+      tenant_id: tenantId,
+      order_id: orderId,
+      from_status: null,
+      to_status: 'pending',
+      source: 'system',
+      metadata: {
+        action: 'order_created',
+        fulfillmentType: input.fulfillmentType,
+        scheduleType: input.scheduleType,
+        paymentMethod: requestedPaymentMethod,
+      },
+    }),
+  ]);
 
   if (updErr) {
     throw new Error(`Pedido ${orderNumber} criado, porém falhou ao vincular metadados: ${updErr.message}`);
@@ -821,21 +838,6 @@ export async function createOrderAtomic(
       // não interrompe o pedido se a contagem falhar
     }
   }
-
-  // Registra evento inicial imutável em order_status_events
-  await supabase.from('order_status_events').insert({
-    tenant_id: tenantId,
-    order_id: orderId,
-    from_status: null,
-    to_status: 'pending',
-    source: 'system',
-    metadata: {
-      action: 'order_created',
-      fulfillmentType: input.fulfillmentType,
-      scheduleType: input.scheduleType,
-      paymentMethod: requestedPaymentMethod,
-    },
-  });
 
   return {
     success: true,
@@ -1540,16 +1542,14 @@ export async function listKdsOrders(tenantId: string): Promise<{
 }> {
   const supabase = createAdminClient();
   const now = new Date();
-  const commerceSettings = await getTenantCommerceSettings(tenantId);
-  const slaConfig = extractTenantSlaConfig(commerceSettings);
-
   const startOfToday = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
   ).toISOString();
 
-  // 1. Busca apenas pedidos ativos de cozinha e histórico de operações concluídas hoje em paralelo
-  const [{ data: rawOrders, error: ordersError }, { data: completedOpsToday }] =
+  // 1. Busca configurações comerciais, pedidos ativos de cozinha e operações concluídas hoje em paralelo
+  const [commerceSettings, { data: rawOrders, error: ordersError }, { data: completedOpsToday }] =
     await Promise.all([
+      getTenantCommerceSettings(tenantId),
       supabase
         .from('orders')
         .select(
@@ -1567,6 +1567,7 @@ export async function listKdsOrders(tenantId: string): Promise<{
         .gte('completed_at', startOfToday)
         .limit(300),
     ]);
+  const slaConfig = extractTenantSlaConfig(commerceSettings);
 
   if (ordersError) {
     throw new Error(`Falha ao carregar fila do KDS: ${ordersError.message}`);
