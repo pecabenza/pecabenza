@@ -43,54 +43,125 @@ export function OrderTimeline({
   };
 
   // Define os passos canônicos da jornada do pedido
-  const steps = [
-    {
-      key: 'pending',
-      label: 'Pedido Recebido',
-      description: 'Solicitação registrada no restaurante',
-      icon: Clock,
-      time: getEventTime('pending') || (timelineEvents[0] ? new Date(timelineEvents[0].createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null),
-    },
-    {
-      key: 'confirmed',
-      label: 'Pedido Confirmado',
-      description: 'Pagamento identificado e aceito',
-      icon: CheckCircle2,
-      time: getEventTime('confirmed'),
-    },
-    {
-      key: 'preparing',
-      label: 'Em Preparação',
-      description: 'Prato sendo preparado na cozinha',
-      icon: ChefHat,
-      time: getEventTime('preparing'),
-    },
-    {
-      key: fulfillmentType === 'pickup' ? 'ready' : 'out_for_delivery',
-      label: fulfillmentType === 'pickup' ? 'Pronto para Retirada' : 'Saiu para Entrega',
-      description: fulfillmentType === 'pickup' ? 'Aguardando sua chegada no balcão' : 'A caminho do seu endereço',
-      icon: fulfillmentType === 'pickup' ? Store : Truck,
-      time: fulfillmentType === 'pickup' ? getEventTime('ready') : (getEventTime('out_for_delivery') || getEventTime('ready')),
-    },
-    {
-      key: 'delivered',
-      label: fulfillmentType === 'pickup' ? 'Retirado' : 'Entregue',
-      description: 'Pedido finalizado com sucesso',
-      icon: PackageCheck,
-      time: getEventTime('delivered'),
-    },
-  ];
+  const steps =
+    fulfillmentType === 'pickup'
+      ? [
+          {
+            key: 'pending',
+            label: 'Pedido Recebido',
+            description: 'Solicitação registrada no restaurante',
+            icon: Clock,
+            time:
+              getEventTime('pending') ||
+              (timelineEvents[0]
+                ? new Date(timelineEvents[0].createdAt).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : null),
+          },
+          {
+            key: 'confirmed',
+            label: 'Pedido Confirmado',
+            description: 'Pagamento identificado e aceito',
+            icon: CheckCircle2,
+            time: getEventTime('confirmed'),
+          },
+          {
+            key: 'preparing',
+            label: 'Em Preparação',
+            description: 'Prato sendo preparado na cozinha',
+            icon: ChefHat,
+            time: getEventTime('preparing'),
+          },
+          {
+            key: 'ready',
+            label: 'Pronto para Retirada',
+            description: 'Aguardando sua chegada no balcão',
+            icon: Store,
+            time: getEventTime('ready'),
+          },
+          {
+            key: 'delivered',
+            label: 'Retirado',
+            description: 'Pedido finalizado com sucesso',
+            icon: PackageCheck,
+            time: getEventTime('delivered'),
+          },
+        ]
+      : [
+          {
+            key: 'pending',
+            label: 'Pedido Recebido',
+            description: 'Solicitação registrada no restaurante',
+            icon: Clock,
+            time:
+              getEventTime('pending') ||
+              (timelineEvents[0]
+                ? new Date(timelineEvents[0].createdAt).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : null),
+          },
+          {
+            key: 'confirmed',
+            label: 'Pedido Confirmado',
+            description: 'Pagamento identificado e aceito',
+            icon: CheckCircle2,
+            time: getEventTime('confirmed'),
+          },
+          {
+            key: 'preparing',
+            label: 'Em Preparação',
+            description: 'Prato sendo preparado na cozinha',
+            icon: ChefHat,
+            time: getEventTime('preparing'),
+          },
+          {
+            key: 'ready',
+            label: 'Pronto · Aguardando Entregador',
+            description: 'Pronto na cozinha, aguardando coleta pelo entregador',
+            icon: Clock,
+            time: getEventTime('ready'),
+          },
+          {
+            key: 'out_for_delivery',
+            label: 'Saiu para Entrega',
+            description: 'A caminho do seu endereço',
+            icon: Truck,
+            time: getEventTime('out_for_delivery'),
+          },
+          {
+            key: 'delivered',
+            label: 'Entregue',
+            description: 'Pedido finalizado com sucesso',
+            icon: PackageCheck,
+            time: getEventTime('delivered'),
+          },
+        ];
 
   // Identifica a posição do status atual
-  const statusIndexMap: Record<string, number> = {
-    pending: 0,
-    confirmed: 1,
-    preparing: 2,
-    ready: 3,
-    out_for_delivery: 3,
-    delivered: 4,
-    cancelled: -1,
-  };
+  const statusIndexMap: Record<string, number> =
+    fulfillmentType === 'pickup'
+      ? {
+          pending: 0,
+          confirmed: 1,
+          preparing: 2,
+          ready: 3,
+          out_for_delivery: 3,
+          delivered: 4,
+          cancelled: -1,
+        }
+      : {
+          pending: 0,
+          confirmed: 1,
+          preparing: 2,
+          ready: 3,
+          out_for_delivery: 4,
+          delivered: 5,
+          cancelled: -1,
+        };
 
   const currentIndex = statusIndexMap[currentStatus] ?? 0;
 

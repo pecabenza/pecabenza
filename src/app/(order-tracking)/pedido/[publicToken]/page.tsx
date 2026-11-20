@@ -315,7 +315,11 @@ export default function PublicOrderTrackingPage({ params }: OrderTrackingPagePro
                 </div>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <Badge variant="primary" className="text-xs font-bold">
-                    {order.statusLabel}
+                    {order.status === 'ready'
+                      ? order.fulfillmentType === 'delivery'
+                        ? 'Pronto · Aguardando Entregador'
+                        : 'Pronto para Retirada'
+                      : order.statusLabel}
                   </Badge>
                   <Badge
                     variant={isPaid ? 'accent' : 'secondary'}
