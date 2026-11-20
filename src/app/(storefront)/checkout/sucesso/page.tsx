@@ -19,6 +19,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { PixPaymentBox } from '@/components/checkout/PixPaymentBox';
+import { CardCheckoutBox } from '@/components/checkout/CardCheckoutBox';
 
 interface VerifiedOrderSummary {
   orderNumber: string;
@@ -38,8 +39,10 @@ function OrderSuccessContent() {
   const orderId = searchParams.get('orderId') || '';
   const trackingToken = searchParams.get('trackingToken') || '';
   const rawPaymentMethod = searchParams.get('paymentMethod') || 'pix';
-  const paymentMethod: 'pix' | 'cash' | 'card_on_delivery' =
-    rawPaymentMethod === 'cash' || rawPaymentMethod === 'card_on_delivery'
+  const paymentMethod: 'pix' | 'card_online' | 'cash' | 'card_on_delivery' =
+    rawPaymentMethod === 'card_online' ||
+    rawPaymentMethod === 'cash' ||
+    rawPaymentMethod === 'card_on_delivery'
       ? rawPaymentMethod
       : 'pix';
 
@@ -166,7 +169,14 @@ function OrderSuccessContent() {
                 {effectivePaid ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Pago com Pix</span>
+                    <span>
+                      {paymentMethod === 'card_online' ? 'Pago com Cartão Online' : 'Pago com Pix'}
+                    </span>
+                  </>
+                ) : paymentMethod === 'card_online' ? (
+                  <>
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Aguardando Pagamento (Cartão Asaas)</span>
                   </>
                 ) : paymentMethod === 'cash' ? (
                   <>
@@ -216,7 +226,7 @@ function OrderSuccessContent() {
             </div>
           </div>
 
-          {/* Seção Transacional de Pagamento Pix ou Instrução de Pagamento Presencial */}
+          {/* Seção Transacional de Pagamento Online (Pix ou Cartão Asaas) ou Presencial */}
           {orderId && paymentMethod === 'pix' && !effectivePaid && (
             <div className="pt-2">
               <PixPaymentBox
@@ -227,7 +237,17 @@ function OrderSuccessContent() {
             </div>
           )}
 
-          {orderId && paymentMethod !== 'pix' && (
+          {orderId && paymentMethod === 'card_online' && !effectivePaid && (
+            <div className="pt-2">
+              <CardCheckoutBox
+                orderId={orderId}
+                orderNumber={orderNumber}
+                onPaymentConfirmed={() => setIsPaid(true)}
+              />
+            </div>
+          )}
+
+          {orderId && paymentMethod !== 'pix' && paymentMethod !== 'card_online' && (
             <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-left space-y-1.5 text-xs text-emerald-800 dark:text-emerald-200">
               <div className="flex items-center gap-2 font-bold text-sm">
                 {paymentMethod === 'cash' ? (

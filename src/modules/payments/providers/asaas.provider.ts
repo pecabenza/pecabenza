@@ -3,6 +3,8 @@ import {
   PaymentProviderName,
   CreatePixPaymentInput,
   PixPaymentResult,
+  CreateCardCheckoutInput,
+  CardCheckoutResult,
   WebhookEventInput,
   ParsedWebhookEvent,
   PaymentStatus,
@@ -137,6 +139,59 @@ export class AsaasPaymentProvider implements PaymentProvider {
       pixExpiresAt: qrCodeData.expirationDate
         ? new Date(qrCodeData.expirationDate).toISOString()
         : expiresAt,
+    };
+  }
+
+  async createCardCheckout(
+    input: CreateCardCheckoutInput
+  ): Promise<Omit<CardCheckoutResult, 'paymentId' | 'orderId'>> {
+    const asaasCustomerId = await this.findOrCreateCustomer(input.customer);
+    const valueInReais = Number((input.amountInCents / 100).toFixed(2));
+    const expirationMinutes = input.expiresInMinutes || 30;
+    const expiresAt = new Date(Date.now() + expirationMinutes * 60 * 1000).toISOString();
+    const dueDate = expiresAt.split('T')[0];
+
+    const paymentRes = await fetch(`${this.baseUrl}/payments`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        customer: asaasCustomerId,
+        billingType: 'CREDIT_CARD',
+        value: valueInReais,
+        dueDate,
+        description: input.description || `Pedido ${input.orderNumber}`,
+        externalReference: input.orderId,
+        postalService: false,
+        ...(input.successUrl
+          ? {
+              callback: {
+                successUrl: input.successUrl,
+                autoRedirect: true,
+              },
+            }
+          : {}),
+      }),
+    });
+
+    if (!paymentRes.ok) {
+      const err = await paymentRes.json();
+      throw new Error(
+        `Falha ao criar checkout de cartão no Asaas: ${JSON.stringify(err.errors || err)}`
+      );
+    }
+
+    const paymentData = await paymentRes.json();
+    if (!paymentData?.id || !paymentData?.invoiceUrl) {
+      throw new Error('Asaas não retornou URL de checkout para pagamento com cartão.');
+    }
+
+    return {
+      provider: 'asaas',
+      providerPaymentId: paymentData.id,
+      status: 'pending',
+      amountInCents: input.amountInCents,
+      checkoutUrl: paymentData.invoiceUrl,
+      expiresAt,
     };
   }
 

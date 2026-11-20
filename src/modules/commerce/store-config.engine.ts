@@ -1,7 +1,7 @@
 import type { TenantCommerceSettings } from '@/types/database.types';
 import { parseCouponCampaigns, type CouponCampaign } from './coupon.engine';
 
-export type StorePaymentOption = 'pix' | 'cash' | 'card_on_delivery';
+export type StorePaymentOption = 'pix' | 'card_online' | 'cash' | 'card_on_delivery';
 export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
 
 export interface DaySchedule {
@@ -74,7 +74,7 @@ export function parseStructuredBusinessHours(raw?: Record<string, any> | null): 
     }
   }
 
-  const validMethods: StorePaymentOption[] = ['pix', 'cash', 'card_on_delivery'];
+  const validMethods: StorePaymentOption[] = ['pix', 'card_online', 'cash', 'card_on_delivery'];
   const parsedMethods = Array.isArray(obj.enabled_payment_methods)
     ? obj.enabled_payment_methods.filter((m: any): m is StorePaymentOption => validMethods.includes(m))
     : [];

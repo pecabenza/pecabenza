@@ -4,6 +4,8 @@ import {
   PaymentProviderName,
   CreatePixPaymentInput,
   PixPaymentResult,
+  CreateCardCheckoutInput,
+  CardCheckoutResult,
   WebhookEventInput,
   ParsedWebhookEvent,
   PaymentStatus,
@@ -48,6 +50,24 @@ export class MockPaymentProvider implements PaymentProvider {
       pixQrCodeText,
       pixQrCodeBase64,
       pixExpiresAt: expiresAt,
+    };
+  }
+
+  async createCardCheckout(
+    input: CreateCardCheckoutInput
+  ): Promise<Omit<CardCheckoutResult, 'paymentId' | 'orderId'>> {
+    const expirationMinutes = input.expiresInMinutes || 30;
+    const expiresAt = new Date(Date.now() + expirationMinutes * 60 * 1000).toISOString();
+    const providerPaymentId = `mock_card_${input.orderId.replace(/-/g, '').slice(0, 16)}`;
+    const checkoutUrl = `https://sandbox.asaas.com/i/${providerPaymentId}`;
+
+    return {
+      provider: 'mock',
+      providerPaymentId,
+      status: 'pending',
+      amountInCents: input.amountInCents,
+      checkoutUrl,
+      expiresAt,
     };
   }
 

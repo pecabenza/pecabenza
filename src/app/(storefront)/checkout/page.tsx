@@ -292,25 +292,47 @@ export default function CheckoutPage() {
     trackEvent('begin_checkout', { itemsCount: items.length });
   }, [revalidateCart, items.length]);
 
-  // Busca automática de CEP via ViaCEP
-  const handleCepBlur = async () => {
-    const cleanCep = zipCode.replace(/\D/g, '');
-    if (cleanCep.length === 8) {
-      setIsLoadingCep(true);
+  // Busca automática de CEP (ViaCEP com fallback BrasilAPI)
+  const lastFetchedCepRef = React.useRef<string>('');
+  const lookupCep = useCallback(async (cleanCep: string) => {
+    if (cleanCep.length !== 8 || lastFetchedCepRef.current === cleanCep) return;
+    lastFetchedCepRef.current = cleanCep;
+    setIsLoadingCep(true);
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      const data = await res.json();
+      if (res.ok && !data.erro && (data.logradouro || data.localidade)) {
+        setStreet(data.logradouro || '');
+        setNeighborhood(data.bairro || '');
+        setCity(data.localidade || '');
+        setState((data.uf || '').toUpperCase());
+        return;
+      }
+      throw new Error('ViaCEP sem resultado');
+    } catch {
       try {
-        const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
-        const data = await res.json();
-        if (!data.erro) {
-          setStreet(data.logradouro || '');
-          setNeighborhood(data.bairro || '');
-          setCity(data.localidade || '');
-          setState(data.uf || '');
+        const resBr = await fetch(`https://brasilapi.com.br/api/cep/v1/${cleanCep}`);
+        if (resBr.ok) {
+          const dataBr = await resBr.json();
+          setStreet(dataBr.street || '');
+          setNeighborhood(dataBr.neighborhood || '');
+          setCity(dataBr.city || '');
+          setState((dataBr.state || '').toUpperCase());
+          return;
         }
       } catch {
-        // Fallback gracioso
-      } finally {
-        setIsLoadingCep(false);
+        // Fallback silencioso para preenchimento manual
       }
+      lastFetchedCepRef.current = '';
+    } finally {
+      setIsLoadingCep(false);
+    }
+  }, []);
+
+  const handleCepBlur = () => {
+    const cleanCep = zipCode.replace(/\D/g, '');
+    if (cleanCep.length === 8) {
+      void lookupCep(cleanCep);
     }
   };
 
@@ -357,6 +379,16 @@ export default function CheckoutPage() {
     setDeliveryQuote(null);
     setQuoteError(null);
   }, [addressSignature]);
+
+  // Dinheiro disponível apenas para retirada no local
+  useEffect(() => {
+    if (fulfillmentType === 'delivery' && paymentMethod === 'cash') {
+      const fallbackMethod =
+        (storeConfig?.enabledPaymentMethods || []).find((m) => m !== 'cash') || 'pix';
+      setPaymentMethod(fallbackMethod);
+      setCashChangeForReais('');
+    }
+  }, [fulfillmentType, paymentMethod, storeConfig]);
 
   // Invalida cotação ao alterar sacola ou modalidade
   useEffect(() => {
@@ -913,10 +945,17 @@ export default function CheckoutPage() {
                           Entrega em Casa
                         </span>
                         <span className="text-xs text-tenant-muted block mt-0.5">
-                          {effectiveSettings.fixedDeliveryFeeCents === 0
+                          {pricingMode === 'distance' || pricingMode === 'distance_band'
+                            ? deliveryQuote?.quote?.eligible
+                              ? deliveryFeeCents === 0
+                                ? 'Entrega grátis'
+                                : `Taxa: ${formatBrl(deliveryFeeCents)}`
+                              : 'Calculada pelo endereço'
+                            : effectiveSettings.fixedDeliveryFeeCents === 0
                             ? 'Entrega grátis'
-                            : `Taxa: ${formatBrl(effectiveSettings.fixedDeliveryFeeCents)}`}
-                          {effectiveSettings.freeDeliveryThresholdCents
+                            : `Taxa fixa: ${formatBrl(effectiveSettings.fixedDeliveryFeeCents)}`}
+                          {effectiveSettings.freeDeliveryThresholdCents &&
+                          effectiveSettings.freeDeliveryThresholdCents > 0
                             ? ` · Grátis acima de ${formatBrl(effectiveSettings.freeDeliveryThresholdCents)}`
                             : ''}
                         </span>
@@ -966,13 +1005,20 @@ export default function CheckoutPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-tenant-muted mb-1">
-                          CEP *
+                          CEP * {isLoadingCep && <span className="text-tenant-primary ml-1">(Buscando...)</span>}
                         </label>
                         <input
                           type="text"
                           required
                           value={zipCode}
-                          onChange={(e) => setZipCode(e.target.value)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setZipCode(val);
+                            const digits = val.replace(/\D/g, '');
+                            if (digits.length === 8) {
+                              void lookupCep(digits);
+                            }
+                          }}
                           onBlur={handleCepBlur}
                           placeholder="00000-000"
                           maxLength={9}
@@ -1341,7 +1387,32 @@ export default function CheckoutPage() {
                     </button>
                   )}
 
-                  {enabledPaymentMethods.includes('cash') && (
+                  {enabledPaymentMethods.includes('card_online') && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('card_online')}
+                      className={`p-4 rounded-xl border text-left flex flex-col justify-between gap-2 transition-all ${
+                        paymentMethod === 'card_online'
+                          ? 'border-tenant-primary bg-tenant-primary/5 ring-1 ring-tenant-primary'
+                          : 'border-tenant-border bg-tenant-background hover:border-tenant-border/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <CreditCard className={`w-5 h-5 ${paymentMethod === 'card_online' ? 'text-tenant-primary' : 'text-tenant-muted'}`} />
+                        {paymentMethod === 'card_online' && <CheckCircle2 className="w-4 h-4 text-tenant-primary" />}
+                      </div>
+                      <div>
+                        <span className="font-heading font-bold text-sm text-tenant-text block">
+                          Cartão Online
+                        </span>
+                        <span className="text-[11px] text-tenant-muted block mt-0.5">
+                          Checkout seguro Asaas
+                        </span>
+                      </div>
+                    </button>
+                  )}
+
+                  {enabledPaymentMethods.includes('cash') && fulfillmentType === 'pickup' && (
                     <button
                       type="button"
                       onClick={() => setPaymentMethod('cash')}
@@ -1360,7 +1431,7 @@ export default function CheckoutPage() {
                           Dinheiro
                         </span>
                         <span className="text-[11px] text-tenant-muted block mt-0.5">
-                          Na {fulfillmentType === 'delivery' ? 'entrega' : 'retirada'}
+                          Na retirada
                         </span>
                       </div>
                     </button>

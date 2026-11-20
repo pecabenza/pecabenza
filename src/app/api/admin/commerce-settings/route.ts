@@ -41,7 +41,7 @@ const SaveStoreConfigSchema = z.object({
       sat: DayScheduleSchema,
     }),
     enabled_payment_methods: z
-      .array(z.enum(['pix', 'cash', 'card_on_delivery']))
+      .array(z.enum(['pix', 'card_online', 'cash', 'card_on_delivery']))
       .min(1, 'Selecione pelo menos uma forma de pagamento.'),
     producao: z.string().max(120).optional(),
     entregas: z.string().max(120).optional(),

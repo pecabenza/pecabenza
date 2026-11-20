@@ -77,19 +77,24 @@ export function StorePaymentsTab({
       <div className="space-y-2.5 text-sm">
         {[
           {
+            id: 'pix' as StorePaymentOption,
+            title: 'Pix Online (QR Code Automático)',
+            desc: 'Exige credenciais de gateway (Asaas) configuradas abaixo.',
+          },
+          {
+            id: 'card_online' as StorePaymentOption,
+            title: 'Cartão Online (Checkout Asaas)',
+            desc: 'Gera link de pagamento seguro hospedado no Asaas.',
+          },
+          {
             id: 'cash' as StorePaymentOption,
-            title: 'Dinheiro na Entrega / Retirada',
-            desc: 'Cliente informa se precisa de troco no checkout.',
+            title: 'Dinheiro (Somente na Retirada)',
+            desc: 'Disponível exclusivamente para retirada no local.',
           },
           {
             id: 'card_on_delivery' as StorePaymentOption,
             title: 'Cartão na Entrega / Maquininha',
             desc: 'Motoboy ou balcão leva a maquininha POS.',
-          },
-          {
-            id: 'pix' as StorePaymentOption,
-            title: 'Pix Online (QR Code Automático)',
-            desc: 'Exige credenciais de gateway (Asaas) configuradas abaixo.',
           },
         ].map((opt) => {
           const checked = enabledMethods.includes(opt.id);

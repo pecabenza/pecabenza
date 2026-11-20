@@ -6,6 +6,8 @@ import {
   PaymentProviderName,
   CreatePixPaymentInput,
   PixPaymentResult,
+  CreateCardCheckoutInput,
+  CardCheckoutResult,
   PaymentStatusResult,
   WebhookEventInput,
   WebhookProcessResult,
@@ -226,6 +228,140 @@ export class PaymentService {
       pixQrCodeText: generatedPix.pixQrCodeText,
       pixQrCodeBase64: generatedPix.pixQrCodeBase64,
       pixExpiresAt: generatedPix.pixExpiresAt,
+    };
+  }
+
+  /**
+   * Gera link de Checkout Asaas para pagamento com Cartão Online (sem tráfego de dados de cartão no servidor)
+   */
+  static async createCardCheckoutPayment(
+    tenantId: string,
+    orderId: string,
+    successUrl?: string
+  ): Promise<CardCheckoutResult> {
+    const supabase = getSupabaseAdmin();
+
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('id', orderId)
+      .single();
+
+    if (orderError || !order) {
+      throw new Error('Pedido não localizado para processamento de pagamento.');
+    }
+
+    if (order.status === 'paid' || order.payment_status === 'paid') {
+      throw new Error('Este pedido já foi pago anteriormente.');
+    }
+
+    if (order.status === 'cancelled') {
+      throw new Error('Este pedido está cancelado e não aceita mais pagamentos.');
+    }
+
+    const { data: existingPayment } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('order_id', orderId)
+      .eq('method', 'credit_card')
+      .eq('status', 'pending')
+      .gt('pix_expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .maybeSingle();
+
+    if (existingPayment && existingPayment.metadata?.checkoutUrl) {
+      return {
+        paymentId: existingPayment.id,
+        orderId: existingPayment.order_id,
+        provider: existingPayment.provider as PaymentProviderName,
+        providerPaymentId: existingPayment.provider_payment_id || '',
+        status: existingPayment.status,
+        amountInCents: existingPayment.amount_cents,
+        checkoutUrl: String(existingPayment.metadata.checkoutUrl),
+        expiresAt: existingPayment.pix_expires_at,
+      };
+    }
+
+    await supabase
+      .from('payments')
+      .update({ status: 'expired', updated_at: new Date().toISOString() })
+      .eq('tenant_id', tenantId)
+      .eq('order_id', orderId)
+      .eq('status', 'pending');
+
+    const provider = await this.getProviderForTenant(tenantId);
+    const cardInput: CreateCardCheckoutInput = {
+      tenantId,
+      orderId: order.id,
+      orderNumber: order.order_number,
+      amountInCents: order.total_cents,
+      customer: {
+        name: order.customer_name,
+        phone: order.customer_phone,
+        email: order.customer_email || undefined,
+      },
+      description: `Pedido ${order.order_number}`,
+      expiresInMinutes: 30,
+      successUrl,
+    };
+
+    const generated = await provider.createCardCheckout(cardInput);
+
+    const { data: savedPayment, error: saveError } = await supabase
+      .from('payments')
+      .insert({
+        tenant_id: tenantId,
+        order_id: orderId,
+        provider: generated.provider,
+        provider_payment_id: generated.providerPaymentId,
+        method: 'credit_card',
+        status: 'pending',
+        amount_cents: generated.amountInCents,
+        pix_expires_at: generated.expiresAt,
+        metadata: {
+          orderNumber: order.order_number,
+          checkoutUrl: generated.checkoutUrl,
+        },
+      })
+      .select()
+      .single();
+
+    if (saveError || !savedPayment) {
+      throw new Error(`Falha ao registrar cobrança no banco: ${saveError?.message || 'Erro desconhecido'}`);
+    }
+
+    const shouldKeepOperationalStatus = ['confirmed', 'preparing', 'ready', 'out_for_delivery'].includes(
+      order.status
+    );
+    await supabase
+      .from('orders')
+      .update({
+        ...(shouldKeepOperationalStatus ? {} : { status: 'awaiting_payment' }),
+        payment_status: 'awaiting_payment',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('tenant_id', tenantId)
+      .eq('id', orderId);
+
+    logger.info('Checkout de cartão gerado com sucesso', {
+      tenantId,
+      orderId,
+      paymentId: savedPayment.id,
+      amountCents: generated.amountInCents,
+      provider: generated.provider,
+    });
+
+    return {
+      paymentId: savedPayment.id,
+      orderId,
+      provider: generated.provider,
+      providerPaymentId: generated.providerPaymentId,
+      status: 'pending',
+      amountInCents: generated.amountInCents,
+      checkoutUrl: generated.checkoutUrl,
+      expiresAt: generated.expiresAt,
     };
   }
 

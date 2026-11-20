@@ -66,7 +66,7 @@ export const CreateOrderInputSchema = z
     scheduleType: z.enum(['asap', 'scheduled']).default('asap'),
     scheduledFor: z.string().datetime({ message: 'Data/hora de agendamento em formato ISO inválido' }).optional(),
     scheduledWindow: z.string().trim().max(40).optional(),
-    paymentMethod: z.enum(['pix', 'cash', 'card_on_delivery']).default('pix'),
+    paymentMethod: z.enum(['pix', 'card_online', 'cash', 'card_on_delivery']).default('pix'),
     cashChangeForCents: z.number().int().nonnegative().optional(),
     couponCode: z.string().trim().max(40).optional(),
     idempotencyKey: z.string().trim().max(100).optional(),

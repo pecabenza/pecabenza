@@ -31,6 +31,21 @@ export interface PixPaymentResult {
   pixExpiresAt: string;
 }
 
+export interface CreateCardCheckoutInput extends CreatePixPaymentInput {
+  successUrl?: string;
+}
+
+export interface CardCheckoutResult {
+  paymentId: string;
+  orderId: string;
+  provider: PaymentProviderName;
+  providerPaymentId: string;
+  status: PaymentStatus;
+  amountInCents: number;
+  checkoutUrl: string;
+  expiresAt: string;
+}
+
 export interface PaymentStatusResult {
   paymentId: string;
   orderId: string;
@@ -71,6 +86,9 @@ export interface WebhookProcessResult {
 export interface PaymentProvider {
   readonly name: PaymentProviderName;
   createPix(input: CreatePixPaymentInput): Promise<Omit<PixPaymentResult, 'paymentId' | 'orderId'>>;
+  createCardCheckout(
+    input: CreateCardCheckoutInput
+  ): Promise<Omit<CardCheckoutResult, 'paymentId' | 'orderId'>>;
   checkStatus(providerPaymentId: string, tenantId: string): Promise<{ status: PaymentStatus; paidAt?: string }>;
   verifyWebhookSignature(input: WebhookEventInput, secret?: string): boolean;
   parseWebhookEvent(input: WebhookEventInput): ParsedWebhookEvent;

@@ -518,6 +518,9 @@ export async function createOrderAtomic(
       `A forma de pagamento "${requestedPaymentMethod}" não está habilitada neste estabelecimento.`
     );
   }
+  if (requestedPaymentMethod === 'cash' && input.fulfillmentType !== 'pickup') {
+    throw new Error('Pagamento em dinheiro está disponível apenas para retirada no local.');
+  }
 
   // 3.3 Idempotência por chave do cliente (evita pedidos duplicados por clique duplo)
   const cleanIdempotencyKey = input.idempotencyKey?.trim() || null;
