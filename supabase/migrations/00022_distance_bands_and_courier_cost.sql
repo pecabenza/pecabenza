@@ -98,6 +98,27 @@ ALTER TABLE public.tenant_commerce_settings
   ADD CONSTRAINT tenant_commerce_settings_distance_bands_check
   CHECK (public.validate_distance_bands_jsonb(distance_bands));
 
+CREATE OR REPLACE FUNCTION public.has_active_distance_band(p_bands jsonb)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  v_elem jsonb;
+BEGIN
+  IF p_bands IS NULL OR jsonb_typeof(p_bands) <> 'array' THEN
+    RETURN false;
+  END IF;
+  FOR v_elem IN SELECT * FROM jsonb_array_elements(p_bands)
+  LOOP
+    IF jsonb_typeof(v_elem->'active') = 'boolean' AND (v_elem->>'active')::boolean = true THEN
+      RETURN true;
+    END IF;
+  END LOOP;
+  RETURN false;
+END;
+$$;
+
 ALTER TABLE public.tenant_commerce_settings
   DROP CONSTRAINT IF EXISTS tenant_commerce_settings_distance_band_non_empty_check;
 
@@ -105,11 +126,7 @@ ALTER TABLE public.tenant_commerce_settings
   ADD CONSTRAINT tenant_commerce_settings_distance_band_non_empty_check
   CHECK (
     pricing_mode <> 'distance_band'
-    OR EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(distance_bands) AS elem
-      WHERE (elem->>'active')::boolean = true
-    )
+    OR public.has_active_distance_band(distance_bands)
   );
 
 -- 3. Colunas operacionais em orders para custo real pago ao app (99/Uber/próprio)
