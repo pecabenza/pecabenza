@@ -10,7 +10,10 @@ import {
   XCircle,
   PackageCheck,
 } from 'lucide-react';
-import { CanonicalOrderStatus } from '@/modules/orders/order-status.machine';
+import {
+  CanonicalOrderStatus,
+  CanonicalPaymentStatus,
+} from '@/modules/orders/order-status.machine';
 
 export interface TimelineEventItem {
   id: string;
@@ -23,16 +26,22 @@ export interface TimelineEventItem {
 
 interface OrderTimelineProps {
   currentStatus: CanonicalOrderStatus;
+  paymentStatus?: CanonicalPaymentStatus;
   fulfillmentType: 'delivery' | 'pickup';
   timelineEvents: TimelineEventItem[];
 }
 
 export function OrderTimeline({
   currentStatus,
+  paymentStatus,
   fulfillmentType,
   timelineEvents,
 }: OrderTimelineProps) {
   const isCancelled = currentStatus === 'cancelled';
+  const confirmedDescription =
+    paymentStatus === 'paid'
+      ? 'Pagamento identificado e aceito'
+      : 'Pedido aceito pelo restaurante (pagamento pendente)';
 
   // Mapeia timestamps dos eventos registrados
   const getEventTime = (status: string): string | null => {
@@ -63,7 +72,7 @@ export function OrderTimeline({
           {
             key: 'confirmed',
             label: 'Pedido Confirmado',
-            description: 'Pagamento identificado e aceito',
+            description: confirmedDescription,
             icon: CheckCircle2,
             time: getEventTime('confirmed'),
           },
@@ -107,7 +116,7 @@ export function OrderTimeline({
           {
             key: 'confirmed',
             label: 'Pedido Confirmado',
-            description: 'Pagamento identificado e aceito',
+            description: confirmedDescription,
             icon: CheckCircle2,
             time: getEventTime('confirmed'),
           },

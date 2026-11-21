@@ -73,6 +73,7 @@ export default function AdminOrdersPage() {
   const [soundActive, setSoundActive] = useState(true);
   const [printOrder, setPrintOrder] = useState<OperationalOrder | null>(null);
   const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
+  const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null);
   const hasLoadedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -85,6 +86,40 @@ export default function AdminOrdersPage() {
     setSoundEnabled(nextState);
     if (nextState) {
       playNewOrderChime();
+    }
+  };
+
+  const handleConfirmPayment = async (order: AdminOrderSummary) => {
+    const methodLabel = PAYMENT_METHOD_LABELS[order.payment_method || 'pix'] || 'Pix';
+    if (
+      !window.confirm(
+        `Confirmar recebimento do pagamento (${methodLabel}) do pedido ${order.order_number} no valor de ${formatBrl(order.total_cents)}?`
+      )
+    ) {
+      return;
+    }
+
+    setConfirmingPaymentId(order.id);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}/payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm_manual',
+          paymentMethod: order.payment_method || 'pix',
+          notes: `Confirmado manualmente na lista de pedidos (${methodLabel})`,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        window.alert(data?.error || 'Não foi possível confirmar o pagamento.');
+        return;
+      }
+      await fetchOrders();
+    } catch {
+      window.alert('Erro de comunicação ao confirmar pagamento.');
+    } finally {
+      setConfirmingPaymentId(null);
     }
   };
 
@@ -379,6 +414,18 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
+                          {order.payment_status === 'pending' && order.status !== 'cancelled' && (
+                            <button
+                              type="button"
+                              onClick={() => handleConfirmPayment(order)}
+                              disabled={confirmingPaymentId === order.id}
+                              title="Confirmar pagamento recebido (PIX / Dinheiro / Cartão)"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-all disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>{confirmingPaymentId === order.id ? '...' : 'Confirmar Pgto'}</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleQuickPrint(order.id)}

@@ -292,37 +292,24 @@ export default function CheckoutPage() {
     trackEvent('begin_checkout', { itemsCount: items.length });
   }, [revalidateCart, items.length]);
 
-  // Busca automática de CEP (ViaCEP com fallback BrasilAPI)
+  // Busca automática de CEP via endpoint próprio (/api/cep/[cep], sem bloqueio de CSP/CORS)
   const lastFetchedCepRef = React.useRef<string>('');
   const lookupCep = useCallback(async (cleanCep: string) => {
     if (cleanCep.length !== 8 || lastFetchedCepRef.current === cleanCep) return;
     lastFetchedCepRef.current = cleanCep;
     setIsLoadingCep(true);
     try {
-      const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      const res = await fetch(`/api/cep/${cleanCep}`);
       const data = await res.json();
-      if (res.ok && !data.erro && (data.logradouro || data.localidade)) {
-        setStreet(data.logradouro || '');
-        setNeighborhood(data.bairro || '');
-        setCity(data.localidade || '');
-        setState((data.uf || '').toUpperCase());
+      if (res.ok && (data.street || data.city)) {
+        setStreet(data.street || '');
+        setNeighborhood(data.neighborhood || '');
+        setCity(data.city || '');
+        setState((data.state || '').toUpperCase());
         return;
       }
-      throw new Error('ViaCEP sem resultado');
+      lastFetchedCepRef.current = '';
     } catch {
-      try {
-        const resBr = await fetch(`https://brasilapi.com.br/api/cep/v1/${cleanCep}`);
-        if (resBr.ok) {
-          const dataBr = await resBr.json();
-          setStreet(dataBr.street || '');
-          setNeighborhood(dataBr.neighborhood || '');
-          setCity(dataBr.city || '');
-          setState((dataBr.state || '').toUpperCase());
-          return;
-        }
-      } catch {
-        // Fallback silencioso para preenchimento manual
-      }
       lastFetchedCepRef.current = '';
     } finally {
       setIsLoadingCep(false);

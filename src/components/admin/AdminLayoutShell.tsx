@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -24,6 +24,9 @@ import {
   LogOut,
   Ticket,
   Users,
+  Wallet,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import type { TenantRole } from '@/types/database.types';
 
@@ -49,6 +52,40 @@ export function AdminLayoutShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoError, setLogoError] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      if (!document.fullscreenElement) {
+        setIsFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (!isFullscreen) {
+      setIsFullscreen(true);
+      setSidebarOpen(false);
+      try {
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch {
+        // Mesmo se o navegador bloquear Fullscreen API, mantém modo expandido sem sidebar
+      }
+    } else {
+      setIsFullscreen(false);
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+      } catch {
+        // ignora erro ao sair
+      }
+    }
+  };
 
   const effectiveSidebarBg = sidebarColor || '#1C1917';
   const effectiveLogoUrl =
@@ -61,6 +98,7 @@ export function AdminLayoutShell({
     { name: 'Operação', href: '/admin/operacao', icon: ChefHat },
     { name: 'Expedição & Rotas', href: '/admin/expedicao', icon: Truck },
     { name: 'Entregadores', href: '/admin/entregadores', icon: Bike },
+    { name: 'Financeiro', href: '/admin/financeiro', icon: Wallet, adminOnly: true },
     { name: 'Configurações da Loja', href: '/admin/configuracoes/loja', icon: Store },
     { name: 'Estações & Fluxo', href: '/admin/configuracoes/operacao', icon: Layers },
     { name: 'Usuários & Senha', href: '/admin/usuarios', icon: Users },
@@ -72,7 +110,7 @@ export function AdminLayoutShell({
     { name: 'Fichas & Produção', href: '/admin/producao', icon: ClipboardList },
     { name: 'Identidade & Cores', href: '/admin/identidade', icon: Palette },
     { name: 'SEO & Metadados', href: '/admin/seo', icon: Search },
-  ];
+  ].filter((item) => !item.adminOnly || role === 'tenant_admin');
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -88,40 +126,54 @@ export function AdminLayoutShell({
   return (
     <div className="min-h-screen bg-stone-100 flex flex-col md:flex-row text-stone-800 font-sans">
       {/* Mobile Header */}
-      <div
-        className="md:hidden flex items-center justify-between text-white px-4 py-3 border-b border-white/10 sticky top-0 z-50"
-        style={{ backgroundColor: effectiveSidebarBg }}
-      >
-        <div className="flex items-center gap-2">
-          {effectiveLogoUrl ? (
-            <img
-              src={effectiveLogoUrl}
-              alt={tenantName}
-              onError={() => setLogoError(true)}
-              className="h-9 w-auto max-w-[160px] object-contain brightness-0 invert"
-            />
-          ) : (
-            <span className="font-bold tracking-tight text-amber-500 font-heading text-lg">
-              {tenantName}
-            </span>
-          )}
-          <span className="text-[11px] bg-black/25 px-2 py-0.5 rounded text-stone-300 capitalize">
-            {role.replace('tenant_', '')}
-          </span>
-        </div>
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-1.5 rounded bg-stone-800 text-stone-300"
-          aria-label="Alternar navegação"
+      {!isFullscreen && (
+        <div
+          className="md:hidden flex items-center justify-between text-white px-4 py-3 border-b border-white/10 sticky top-0 z-50"
+          style={{ backgroundColor: effectiveSidebarBg }}
         >
-          {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
-      </div>
+          <div className="flex items-center gap-2">
+            {effectiveLogoUrl ? (
+              <img
+                src={effectiveLogoUrl}
+                alt={tenantName}
+                onError={() => setLogoError(true)}
+                className="h-9 w-auto max-w-[160px] object-contain brightness-0 invert"
+              />
+            ) : (
+              <span className="font-bold tracking-tight text-amber-500 font-heading text-lg">
+                {tenantName}
+              </span>
+            )}
+            <span className="text-[11px] bg-black/25 px-2 py-0.5 rounded text-stone-300 capitalize">
+              {role.replace('tenant_', '')}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="p-1.5 rounded bg-stone-800 text-stone-300 hover:text-white"
+              aria-label="Ver em tela cheia"
+              title="Ver em tela cheia"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-1.5 rounded bg-stone-800 text-stone-300"
+              aria-label="Alternar navegação"
+            >
+              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Sidebar Desktop e Mobile Drawer */}
       <aside
-        className={`${sidebarOpen ? 'flex' : 'hidden'
-          } md:flex flex-col justify-between w-full md:w-64 text-stone-300 flex-shrink-0 fixed md:sticky top-0 left-0 h-dvh md:h-screen overflow-hidden z-40`}
+        className={`${sidebarOpen ? 'flex' : 'hidden'} ${
+          isFullscreen ? 'md:hidden' : 'md:flex'
+        } flex-col justify-between w-full md:w-64 text-stone-300 flex-shrink-0 fixed md:sticky top-0 left-0 h-dvh md:h-screen overflow-hidden z-40`}
         style={{ backgroundColor: effectiveSidebarBg }}
       >
         <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
@@ -168,9 +220,17 @@ export function AdminLayoutShell({
 
         {/* Rodapé da Sidebar */}
         <div
-          className="shrink-0 p-4 border-t border-white/10 space-y-2"
+          className="shrink-0 p-4 border-t border-white/10 space-y-1.5"
           style={{ backgroundColor: effectiveSidebarBg }}
         >
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-stone-300 hover:text-white rounded hover:bg-stone-800 transition-colors"
+          >
+            <span>Ver em Tela Cheia</span>
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
           <Link
             href="/"
             target="_blank"
@@ -193,12 +253,34 @@ export function AdminLayoutShell({
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto relative">
+        <div className="flex justify-end mb-3">
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Sair da tela cheia' : 'Expandir para tela cheia'}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-stone-700 hover:bg-stone-50 text-xs font-semibold shadow-sm transition-colors"
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize2 className="w-3.5 h-3.5 text-amber-600" />
+                <span>Sair da Tela Cheia</span>
+              </>
+            ) : (
+              <>
+                <Maximize2 className="w-3.5 h-3.5 text-stone-500" />
+                <span>Tela Cheia</span>
+              </>
+            )}
+          </button>
+        </div>
         <div
           className={
-            pathname.startsWith('/admin/kds') ||
-              pathname === '/admin/operacao' ||
-              pathname === '/admin/pedido-rapido'
+            isFullscreen
+              ? 'max-w-none mx-auto'
+              : pathname.startsWith('/admin/kds') ||
+                pathname === '/admin/operacao' ||
+                pathname === '/admin/pedido-rapido'
               ? 'max-w-[1800px] mx-auto'
               : 'max-w-6xl mx-auto'
           }

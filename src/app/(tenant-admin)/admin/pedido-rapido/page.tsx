@@ -104,6 +104,7 @@ export default function QuickOrderPosPage() {
 
   // Endereço de entrega (Feira de Santana - BA como padrão operacional)
   const [zipCode, setZipCode] = useState('');
+  const [isLoadingCep, setIsLoadingCep] = useState(false);
   const [street, setStreet] = useState('');
   const [number, setNumber] = useState('');
   const [complement, setComplement] = useState('');
@@ -250,6 +251,29 @@ export default function QuickOrderPosPage() {
     setCustomerSearch('');
     setCustomerSuggestions([]);
   };
+
+  const lastPosCepRef = useRef('');
+  const lookupPosCep = useCallback(async (cleanCep: string) => {
+    if (cleanCep.length !== 8 || lastPosCepRef.current === cleanCep) return;
+    lastPosCepRef.current = cleanCep;
+    setIsLoadingCep(true);
+    try {
+      const res = await fetch(`/api/cep/${cleanCep}`);
+      const data = await res.json();
+      if (res.ok && (data.street || data.city)) {
+        setStreet(data.street || '');
+        setNeighborhood(data.neighborhood || '');
+        if (data.city) setCity(data.city);
+        if (data.state) setStateUf(String(data.state).toUpperCase());
+        return;
+      }
+      lastPosCepRef.current = '';
+    } catch {
+      lastPosCepRef.current = '';
+    } finally {
+      setIsLoadingCep(false);
+    }
+  }, []);
 
   const appendCartItem = (
     product: CatalogProduct,
@@ -972,13 +996,27 @@ export default function QuickOrderPosPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                   <div className="sm:col-span-4">
                     <label htmlFor="pos-zip" className="block text-[11px] font-semibold text-stone-600 mb-0.5">
-                      CEP (Opcional)
+                      CEP (Opcional) {isLoadingCep && <span className="text-amber-600">(Buscando...)</span>}
                     </label>
                     <input
                       id="pos-zip"
                       type="text"
                       value={zipCode}
-                      onChange={(e) => setZipCode(e.target.value)}
+                      maxLength={9}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setZipCode(val);
+                        const digits = val.replace(/\D/g, '');
+                        if (digits.length === 8) {
+                          void lookupPosCep(digits);
+                        }
+                      }}
+                      onBlur={() => {
+                        const digits = zipCode.replace(/\D/g, '');
+                        if (digits.length === 8) {
+                          void lookupPosCep(digits);
+                        }
+                      }}
                       placeholder="44000-000"
                       className="w-full min-h-[36px] px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white text-xs"
                     />

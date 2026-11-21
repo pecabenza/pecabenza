@@ -243,8 +243,8 @@ export default function AdminProductsPage() {
 
   const handleDeleteProduct = async (id: string, name: string) => {
     const confirmed = await showConfirm({
-      title: 'Excluir prato',
-      message: `Deseja realmente excluir o prato "${name}"? Se ele já tiver pedidos ou lotes de estoque vinculados, será arquivado com segurança e ocultado do cardápio.`,
+      title: 'Excluir item',
+      message: `Deseja realmente excluir o item "${name}"? Se ele já tiver pedidos ou lotes de estoque vinculados, será arquivado com segurança e ocultado do cardápio.`,
       variant: 'danger',
       confirmLabel: 'Sim, excluir',
       cancelLabel: 'Cancelar',
@@ -258,13 +258,13 @@ export default function AdminProductsPage() {
         setProducts(products.filter((p) => p.id !== id));
         showFeedback(
           data?.archived
-            ? data.message || `Prato "${name}" arquivado e ocultado do cardápio.`
-            : `Prato "${name}" excluído com sucesso.`
+            ? data.message || `Item "${name}" arquivado e ocultado do cardápio.`
+            : `Item "${name}" excluído com sucesso.`
         );
       } else {
         await showAlert({
           title: 'Erro ao excluir',
-          message: data?.error || `Erro ao excluir prato (HTTP ${res.status}).`,
+          message: data?.error || `Erro ao excluir item (HTTP ${res.status}).`,
           variant: 'error',
         });
       }
@@ -295,22 +295,22 @@ export default function AdminProductsPage() {
         );
         showFeedback(
           nextStatus === 'draft'
-            ? `Prato "${product.name}" pausado e ocultado do cardápio.`
-            : `Prato "${product.name}" ativado no cardápio.`
+            ? `Item "${product.name}" pausado e ocultado do cardápio.`
+            : `Item "${product.name}" ativado no cardápio.`
         );
       } else {
         await showAlert({
           title: 'Erro ao atualizar status',
           message:
             data?.error ||
-            `Não foi possível atualizar o status do prato (HTTP ${res.status}).`,
+            `Não foi possível atualizar o status do item (HTTP ${res.status}).`,
           variant: 'error',
         });
       }
     } catch {
       await showAlert({
         title: 'Erro de comunicação',
-        message: 'Erro de comunicação ao atualizar status do prato.',
+        message: 'Erro de comunicação ao atualizar status do item.',
         variant: 'error',
       });
     } finally {
@@ -325,7 +325,7 @@ export default function AdminProductsPage() {
     if (!editingProduct.name.trim()) {
       await showAlert({
         title: 'Campo obrigatório',
-        message: 'O nome do prato é obrigatório.',
+        message: 'O nome do item é obrigatório.',
         variant: 'warning',
       });
       return;
@@ -384,7 +384,7 @@ export default function AdminProductsPage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setEditingProduct(null);
-        showFeedback(isNew ? 'Novo prato cadastrado com sucesso!' : 'Prato atualizado com sucesso no banco!');
+        showFeedback(isNew ? 'Novo item cadastrado com sucesso!' : 'Item atualizado com sucesso no banco!');
         loadProducts();
       } else {
         const details = data.details ? data.details.map((d: any) => `${d.field}: ${d.message}`).join(', ') : '';
@@ -421,8 +421,8 @@ export default function AdminProductsPage() {
   const handleRemoveVariant = async (index: number) => {
     if (!editingProduct || editingProduct.variants.length <= 1) {
       await showAlert({
-        title: 'Porção obrigatória',
-        message: 'O prato deve possuir ao menos uma porção/variação.',
+        title: 'Variação obrigatória',
+        message: 'O item deve possuir ao menos uma porção/variação.',
         variant: 'warning',
       });
       return;
@@ -472,7 +472,7 @@ export default function AdminProductsPage() {
             className="gap-2 bg-stone-900 text-white hover:bg-stone-800"
           >
             <Plus className="w-4 h-4" />
-            <span>Novo Prato</span>
+            <span>Novo Item</span>
           </Button>
 
           {feedbackMessage && (
@@ -499,12 +499,12 @@ export default function AdminProductsPage() {
       ) : products.length === 0 ? (
         <Card className="p-12 text-center bg-white space-y-3 border-dashed">
           <UtensilsCrossed className="w-8 h-8 text-stone-400 mx-auto" />
-          <h3 className="font-bold text-stone-900 text-sm">Nenhum prato cadastrado ainda</h3>
+          <h3 className="font-bold text-stone-900 text-sm">Nenhum item cadastrado ainda</h3>
           <p className="text-xs text-stone-500 max-w-sm mx-auto">
-            Cadastre os pratos do seu estabelecimento para compor o cardápio institucional e futuro comércio eletrônico.
+            Cadastre os pratos, bebidas e acompanhamentos do seu estabelecimento para compor o cardápio.
           </p>
           <Button onClick={handleCreateNew} size="sm" className="mt-2">
-            Cadastrar Primeiro Prato
+            Cadastrar Primeiro Item
           </Button>
         </Card>
       ) : (
@@ -564,7 +564,7 @@ export default function AdminProductsPage() {
                     variant="outline"
                     onClick={() => handleEdit(product)}
                     className="p-2 h-8 w-8 text-stone-600"
-                    title="Editar prato"
+                    title="Editar item"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </Button>
@@ -573,7 +573,7 @@ export default function AdminProductsPage() {
                     variant="outline"
                     onClick={() => handleDeleteProduct(product.id, product.name)}
                     className="p-2 h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    title="Excluir prato"
+                    title="Excluir item"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -607,17 +607,17 @@ export default function AdminProductsPage() {
         </div>
       )}
 
-      {/* Modal de Criação / Edição de Prato */}
+      {/* Modal de Criação / Edição de Item */}
       {editingProduct && (
         <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-3xl bg-white shadow-xl max-h-[90vh] flex flex-col">
             <div className="p-6 border-b border-stone-200 flex items-center justify-between">
               <div>
                 <h2 className="font-heading text-lg font-bold text-stone-900">
-                  {isNew ? 'Cadastrar Novo Prato' : `Editar: ${editingProduct.name}`}
+                  {isNew ? 'Cadastrar Novo Item' : `Editar: ${editingProduct.name}`}
                 </h2>
                 <p className="text-xs text-stone-500">
-                  Defina fotos, porções, preços e ficha técnica nutricional.
+                  Defina fotos, porções/tamanhos, preços e ficha técnica (opcional).
                 </p>
               </div>
               <button
@@ -629,29 +629,29 @@ export default function AdminProductsPage() {
             </div>
 
             <form onSubmit={handleSaveProduct} className="p-6 space-y-6 max-h-[75vh] overflow-y-auto flex-1">
-              {/* Foto de Capa do Prato */}
+              {/* Foto de Capa do Item */}
               <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/50">
                 <ImageUploadField
-                  label="Fotografia do Prato"
+                  label="Fotografia do Item"
                   value={editingProduct.cover_image_url}
                   onChange={(url) => setEditingProduct({ ...editingProduct, cover_image_url: url })}
                   category="products"
                   aspectRatio="square"
-                  helperText="Fotografia real do prato preparado para exibição no cardápio."
+                  helperText="Fotografia real do item para exibição no cardápio."
                 />
               </div>
 
               {/* Informações Básicas */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5 sm:col-span-2">
-                  <label className="text-xs font-bold uppercase text-stone-700">Nome do Prato</label>
+                  <label className="text-xs font-bold uppercase text-stone-700">Nome do Item</label>
                   <input
                     type="text"
                     required
                     value={editingProduct.name}
                     onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
                     className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800"
-                    placeholder="Ex: Feijoada Tradicional"
+                    placeholder="Ex: Feijoada Tradicional, Refrigerante 350ml, Arroz Branco"
                   />
                 </div>
 
@@ -734,7 +734,7 @@ export default function AdminProductsPage() {
                     value={editingProduct.full_description}
                     onChange={(e) => setEditingProduct({ ...editingProduct, full_description: e.target.value })}
                     className="w-full px-3.5 py-2 rounded-lg border border-stone-300 text-sm focus:outline-none focus:border-stone-800 resize-none"
-                    placeholder="Conte a história do prato, métodos de cozimento e particularidades."
+                    placeholder="Detalhes do item, ingredientes principais ou particularidades (opcional)."
                   />
                 </div>
               </div>
@@ -1238,7 +1238,7 @@ export default function AdminProductsPage() {
                 </Button>
                 <Button type="submit" isLoading={isSaving} className="gap-2 bg-stone-900 text-white hover:bg-stone-800">
                   <Save className="w-4 h-4" />
-                  <span>Salvar Prato</span>
+                  <span>Salvar Item</span>
                 </Button>
               </div>
             </form>

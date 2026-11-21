@@ -4,6 +4,7 @@ import { getAdminAuthSession } from '@/lib/tenancy/admin-auth';
 import { logger } from '@/lib/observability/logger';
 import { confirmManualOrderPayment } from '@/modules/orders/orders.service';
 import { PaymentService } from '@/modules/payments/payment.service';
+import { recordOrderIncomeEntry } from '@/modules/finance/finance.service';
 import type { OrderPaymentMethod } from '@/types/database.types';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,7 @@ const PaymentActionSchema = z.discriminatedUnion('action', [
     paymentMethod: z
       .enum(['pix', 'cash', 'card_on_delivery', 'pos_card', 'credit_card'])
       .optional(),
+    accountId: z.string().uuid().optional(),
     notes: z.string().trim().max(300).optional(),
   }),
 ]);
@@ -65,6 +67,23 @@ export async function POST(
         email: session.user.email,
       }
     );
+
+    // Lançamento automático no módulo financeiro (tolerante se migração 00023 ainda não foi aplicada)
+    try {
+      await recordOrderIncomeEntry(
+        session.tenant.id,
+        orderId,
+        confirmResult.payment_method || data.paymentMethod,
+        session.user.id,
+        data.accountId
+      );
+    } catch (finErr: any) {
+      logger.warn('Aviso ao registrar entrada financeira automática do pedido', {
+        tenantId: session.tenant.id,
+        orderId,
+        error: finErr?.message,
+      });
+    }
 
     logger.info('Pagamento manual confirmado pelo operador', {
       tenantId: session.tenant.id,

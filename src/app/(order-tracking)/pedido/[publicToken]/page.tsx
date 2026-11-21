@@ -396,6 +396,7 @@ export default function PublicOrderTrackingPage({ params }: OrderTrackingPagePro
               </h2>
               <OrderTimeline
                 currentStatus={order.status}
+                paymentStatus={order.paymentStatus}
                 fulfillmentType={order.fulfillmentType}
                 timelineEvents={order.timeline}
               />
