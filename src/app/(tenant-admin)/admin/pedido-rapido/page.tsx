@@ -721,6 +721,9 @@ export default function QuickOrderPosPage() {
             setPrintDefaultMode(mode);
             setPrintModalOrder(buildOperationalOrderForPrint(createdOrder));
           }}
+          onPaymentConfirmed={() => {
+            setCreatedOrder((prev) => (prev ? { ...prev, paymentStatus: 'paid' } : prev));
+          }}
           onStartNewOrder={handleResetNewOrder}
         />
       )}

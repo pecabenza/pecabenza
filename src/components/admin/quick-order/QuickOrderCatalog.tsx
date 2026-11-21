@@ -199,7 +199,7 @@ export function QuickOrderCatalog({
                 </div>
 
                 {/* Botões de Variantes / Porções */}
-                <div className="flex flex-wrap gap-1.5 pt-2 border-t border-stone-200/60">
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-stone-200/60">
                   {product.variants.map((variant) => {
                     const isAvailable = variant.is_available !== false;
                     return (
@@ -208,15 +208,15 @@ export function QuickOrderCatalog({
                         type="button"
                         disabled={!isAvailable}
                         onClick={() => isAvailable && onSelectVariant(product, variant)}
-                        className={`flex-1 min-w-[115px] min-h-[40px] px-2.5 py-2 rounded-lg border text-xs font-bold transition-all flex items-center justify-between gap-1 shadow-2xs ${
+                        className={`w-full min-h-[40px] px-3 py-2 rounded-lg border text-xs font-bold transition-all flex items-center justify-between gap-2 shadow-2xs ${
                           isAvailable
-                            ? 'bg-white hover:bg-emerald-50 border-stone-200 hover:border-emerald-400 text-stone-800 active:scale-[0.98]'
+                            ? 'bg-white hover:bg-emerald-50 border-stone-200 hover:border-emerald-400 text-stone-800 active:scale-[0.99]'
                             : 'bg-stone-100 border-stone-200 text-stone-400 cursor-not-allowed'
                         }`}
                       >
-                        <span className="truncate">{variant.name}</span>
+                        <span className="text-left leading-snug break-words">{variant.name}</span>
                         <span
-                          className={`font-mono flex items-center gap-0.5 shrink-0 ${
+                          className={`font-mono flex items-center gap-1 shrink-0 ${
                             isAvailable ? 'text-emerald-700' : 'text-stone-400'
                           }`}
                         >

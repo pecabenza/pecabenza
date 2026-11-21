@@ -31,6 +31,7 @@ interface QuickOrderSuccessPanelProps {
   onCopyWhatsApp: () => void;
   onCopyPix: () => void;
   onOpenPrintModal: (mode: PrintTicketMode) => void;
+  onPaymentConfirmed?: () => void;
   onStartNewOrder: () => void;
 }
 
@@ -41,10 +42,40 @@ export function QuickOrderSuccessPanel({
   onCopyWhatsApp,
   onCopyPix,
   onOpenPrintModal,
+  onPaymentConfirmed,
   onStartNewOrder,
 }: QuickOrderSuccessPanelProps) {
   const [livePaymentStatus, setLivePaymentStatus] = useState<string>(createdOrder.paymentStatus);
   const [isPixExpired, setIsPixExpired] = useState(false);
+  const [isConfirmingPayment, setIsConfirmingPayment] = useState(false);
+  const [paymentActionError, setPaymentActionError] = useState<string | null>(null);
+
+  const handleMarkAsPaid = async () => {
+    setPaymentActionError(null);
+    setIsConfirmingPayment(true);
+    try {
+      const res = await fetch(`/api/admin/orders/${createdOrder.orderId}/payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'confirm_manual',
+          paymentMethod: createdOrder.paymentMethod,
+          notes: 'Confirmado manualmente no Pedido Rápido',
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setPaymentActionError(data?.error || 'Não foi possível confirmar o pagamento.');
+        return;
+      }
+      setLivePaymentStatus('paid');
+      onPaymentConfirmed?.();
+    } catch {
+      setPaymentActionError('Erro de comunicação ao confirmar pagamento.');
+    } finally {
+      setIsConfirmingPayment(false);
+    }
+  };
 
   const paymentId = createdOrder.pixPayment?.paymentId;
   const pixExpiresAt = createdOrder.pixPayment?.pixExpiresAt;
@@ -149,21 +180,24 @@ export function QuickOrderSuccessPanel({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onOpenPrintModal('kitchen')}
-            className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir Cozinha</span>
-          </button>
+          {livePaymentStatus !== 'paid' && (
+            <button
+              type="button"
+              onClick={handleMarkAsPaid}
+              disabled={isConfirmingPayment}
+              className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{isConfirmingPayment ? 'Confirmando...' : 'Marcar como Pago'}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onOpenPrintModal('full')}
-            className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-900 text-white text-xs font-bold shadow-xs"
+            className="min-h-[40px] flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold shadow-xs"
           >
             <Printer className="w-4 h-4" />
-            <span>Imprimir Balcão/Entrega</span>
+            <span>Imprimir Pedido</span>
           </button>
           <button
             type="button"
@@ -175,6 +209,12 @@ export function QuickOrderSuccessPanel({
           </button>
         </div>
       </div>
+
+      {paymentActionError && (
+        <div className="p-3 rounded-xl bg-red-100 border border-red-200 text-red-800 text-xs font-semibold">
+          {paymentActionError}
+        </div>
+      )}
 
       {/* Resumo WhatsApp + Cobrança Pix + Link de Rastreio */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

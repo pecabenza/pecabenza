@@ -40,6 +40,10 @@ export function OrderPrintModal({
   const [ticketMode, setTicketMode] = useState<PrintTicketMode>(defaultMode);
 
   useEffect(() => {
+    setTicketMode(defaultMode);
+  }, [defaultMode, order?.id]);
+
+  useEffect(() => {
     try {
       const saved = window.localStorage.getItem(PAPER_WIDTH_STORAGE_KEY) as ThermalPaperWidth | null;
       if (saved === '58mm' || saved === '70mm' || saved === '80mm') {
@@ -332,10 +336,12 @@ export function OrderPrintModal({
               margin: 0mm;
             }
             html,
-            body {
+            body,
+            main {
               height: auto !important;
               min-height: 0 !important;
               overflow: visible !important;
+              position: static !important;
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
