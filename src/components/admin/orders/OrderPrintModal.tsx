@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Printer, FileText, Flame } from 'lucide-react';
 import { formatBrl } from '@/modules/cart/cart.utils';
 import type { OperationalOrder } from '@/modules/orders/orders.service';
@@ -10,8 +10,16 @@ import {
   PAYMENT_METHOD_LABELS,
 } from '@/modules/orders/order-status.machine';
 
-export type ThermalPaperWidth = '58mm' | '80mm';
+export type ThermalPaperWidth = '58mm' | '70mm' | '80mm';
 export type PrintTicketMode = 'full' | 'kitchen' | 'hot_kitchen' | 'assembly' | 'expedition';
+
+const PAPER_WIDTH_STORAGE_KEY = 'benza_print_paper_width';
+
+const PRINTABLE_WIDTH_MAP: Record<ThermalPaperWidth, string> = {
+  '58mm': '52mm',
+  '70mm': '66mm',
+  '80mm': '72mm',
+};
 
 interface OrderPrintModalProps {
   order: OperationalOrder | null;
@@ -30,6 +38,26 @@ export function OrderPrintModal({
 }: OrderPrintModalProps) {
   const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>(defaultPaperWidth);
   const [ticketMode, setTicketMode] = useState<PrintTicketMode>(defaultMode);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(PAPER_WIDTH_STORAGE_KEY) as ThermalPaperWidth | null;
+      if (saved === '58mm' || saved === '70mm' || saved === '80mm') {
+        setPaperWidth(saved);
+      }
+    } catch {
+      // ignora erro de storage
+    }
+  }, []);
+
+  const handleSelectPaperWidth = (w: ThermalPaperWidth) => {
+    setPaperWidth(w);
+    try {
+      window.localStorage.setItem(PAPER_WIDTH_STORAGE_KEY, w);
+    } catch {
+      // ignora erro de storage
+    }
+  };
 
   if (!order) return null;
 
@@ -85,7 +113,7 @@ export function OrderPrintModal({
                   Impressão Térmica de Comanda ({order.orderNumber})
                 </h3>
                 <p className="text-[11px] text-stone-500">
-                  Selecione largura da bobina (58mm/80mm) e tipo de via
+                  Selecione largura da bobina (58mm/70mm/80mm) e tipo de via
                 </p>
               </div>
             </div>
@@ -107,14 +135,14 @@ export function OrderPrintModal({
             </div>
           </div>
 
-          {/* Seletores de Largura (58mm / 80mm) e Modo de Comanda */}
+          {/* Seletores de Largura (58mm / 70mm / 80mm) e Modo de Comanda */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-200/70 text-xs">
             <div className="flex items-center gap-1 bg-stone-200/70 p-1 rounded-lg">
-              {(['58mm', '80mm'] as ThermalPaperWidth[]).map((w) => (
+              {(['58mm', '70mm', '80mm'] as ThermalPaperWidth[]).map((w) => (
                 <button
                   key={w}
                   type="button"
-                  onClick={() => setPaperWidth(w)}
+                  onClick={() => handleSelectPaperWidth(w)}
                   className={`px-2.5 py-1 rounded-md font-bold transition-all ${
                     paperWidth === w
                       ? 'bg-stone-900 text-white shadow-xs'
@@ -156,7 +184,11 @@ export function OrderPrintModal({
           <div
             id="printable-ticket"
             className={`bg-white text-black font-mono border border-stone-300 shadow-sm p-4 print:border-none print:shadow-none ${
-              paperWidth === '58mm' ? 'w-[220px] text-[11px]' : 'w-[302px] text-xs'
+              paperWidth === '58mm'
+                ? 'w-[220px] text-[11px]'
+                : paperWidth === '70mm'
+                ? 'w-[264px] text-xs'
+                : 'w-[302px] text-xs'
             }`}
           >
             {/* Cabeçalho da Comanda */}
@@ -319,12 +351,13 @@ export function OrderPrintModal({
               position: absolute;
               left: 0;
               top: 0;
-              width: ${paperWidth};
-              max-width: ${paperWidth};
+              box-sizing: border-box;
+              width: ${PRINTABLE_WIDTH_MAP[paperWidth]};
+              max-width: ${PRINTABLE_WIDTH_MAP[paperWidth]};
               height: auto !important;
               overflow: visible !important;
               margin: 0;
-              padding: 2mm;
+              padding: 1.5mm 2mm;
               font-family: monospace, sans-serif;
               page-break-inside: auto;
             }
