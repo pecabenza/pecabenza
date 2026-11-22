@@ -109,14 +109,23 @@ function getMonthStartIso(): string {
   return `${y}-${m}-01`;
 }
 
+function getDaysAgoIso(days: number): string {
+  const now = new Date();
+  now.setDate(now.getDate() - days);
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function FinanceDashboardClient() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  // Filtros
-  const [startDate, setStartDate] = useState(getMonthStartIso);
+  // Filtros (inicia exibindo o financeiro do dia)
+  const [startDate, setStartDate] = useState(getTodayIso);
   const [endDate, setEndDate] = useState(getTodayIso);
   const [accountFilter, setAccountFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState<'all' | EntryType>('all');
@@ -811,6 +820,51 @@ export function FinanceDashboardClient() {
       {/* Filtros & Extrato */}
       <div className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-stone-200 flex flex-wrap items-end gap-3 bg-stone-50">
+          <div className="flex items-center gap-1.5 mr-2 self-center pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                const today = getTodayIso();
+                setStartDate(today);
+                setEndDate(today);
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                startDate === getTodayIso() && endDate === getTodayIso()
+                  ? 'bg-stone-900 text-white border-stone-900'
+                  : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
+              }`}
+            >
+              Hoje
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStartDate(getDaysAgoIso(6));
+                setEndDate(getTodayIso());
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                startDate === getDaysAgoIso(6) && endDate === getTodayIso()
+                  ? 'bg-stone-900 text-white border-stone-900'
+                  : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
+              }`}
+            >
+              7 dias
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStartDate(getMonthStartIso());
+                setEndDate(getTodayIso());
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                startDate === getMonthStartIso() && endDate === getTodayIso()
+                  ? 'bg-stone-900 text-white border-stone-900'
+                  : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-100'
+              }`}
+            >
+              Este mês
+            </button>
+          </div>
           <div>
             <label className="block text-[10px] font-bold uppercase text-stone-500 mb-1">De</label>
             <input

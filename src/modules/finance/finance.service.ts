@@ -119,6 +119,14 @@ function pickDefaultAccountForMethod(
   );
 }
 
+function toBrazilDateIso(isoTimestamp?: string | null): string {
+  const date = isoTimestamp ? new Date(isoTimestamp) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  }
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(date);
+}
+
 /**
  * Registra entrada automática no financeiro para um pedido pago (idempotente por order_id).
  */
@@ -164,7 +172,7 @@ export async function recordOrderIncomeEntry(
     return { created: false };
   }
 
-  const occurredOn = (order.paid_at || order.created_at || new Date().toISOString()).slice(0, 10);
+  const occurredOn = toBrazilDateIso(order.paid_at || order.created_at);
 
   const { data: inserted, error: insErr } = await supabase
     .from('finance_entries')
@@ -251,7 +259,7 @@ export async function syncPaidOrdersToFinance(
         amount_cents: order.total_cents,
         payment_method: order.payment_method || 'pix',
         status: 'paid' as const,
-        occurred_on: (order.paid_at || order.created_at || new Date().toISOString()).slice(0, 10),
+        occurred_on: toBrazilDateIso(order.paid_at || order.created_at),
         order_id: order.id,
         created_by: actorUserId || null,
       };
@@ -287,6 +295,8 @@ export async function getFinanceDashboard(
   filters: FinanceDashboardFilters = {}
 ) {
   const supabase = createAdminClient();
+  // Sincronização automática de vendas pagas ao abrir/atualizar o financeiro
+  await syncPaidOrdersToFinance(tenantId);
   const accounts = await ensureDefaultFinanceAccounts(tenantId);
 
   // Busca todos os lançamentos pagos para calcular saldo real acumulado de cada conta
