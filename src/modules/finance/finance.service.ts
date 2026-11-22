@@ -153,7 +153,7 @@ export async function recordOrderIncomeEntry(
 
   const { data: order, error: orderErr } = await supabase
     .from('orders')
-    .select('id, order_number, customer_name, total_cents, payment_method, paid_at, created_at')
+    .select('id, order_number, customer_name, total_cents, payment_method, created_at')
     .eq('tenant_id', tenantId)
     .eq('id', orderId)
     .maybeSingle();
@@ -172,7 +172,7 @@ export async function recordOrderIncomeEntry(
     return { created: false };
   }
 
-  const occurredOn = toBrazilDateIso(order.paid_at || order.created_at);
+  const occurredOn = toBrazilDateIso(order.created_at);
 
   const { data: inserted, error: insErr } = await supabase
     .from('finance_entries')
@@ -217,7 +217,7 @@ export async function syncPaidOrdersToFinance(
     await Promise.all([
       supabase
         .from('orders')
-        .select('id, order_number, customer_name, total_cents, payment_method, paid_at, created_at')
+        .select('id, order_number, customer_name, total_cents, payment_method, created_at')
         .eq('tenant_id', tenantId)
         .eq('payment_status', 'paid')
         .neq('status', 'cancelled')
@@ -259,7 +259,7 @@ export async function syncPaidOrdersToFinance(
         amount_cents: order.total_cents,
         payment_method: order.payment_method || 'pix',
         status: 'paid' as const,
-        occurred_on: toBrazilDateIso(order.paid_at || order.created_at),
+        occurred_on: toBrazilDateIso(order.created_at),
         order_id: order.id,
         created_by: actorUserId || null,
       };
