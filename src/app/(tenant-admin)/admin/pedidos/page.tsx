@@ -21,6 +21,7 @@ import {
   Printer,
   Volume2,
   VolumeX,
+  Trash2,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -74,6 +75,7 @@ export default function AdminOrdersPage() {
   const [printOrder, setPrintOrder] = useState<OperationalOrder | null>(null);
   const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
   const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const hasLoadedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -120,6 +122,33 @@ export default function AdminOrdersPage() {
       window.alert('Erro de comunicação ao confirmar pagamento.');
     } finally {
       setConfirmingPaymentId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (order: AdminOrderSummary) => {
+    if (
+      !window.confirm(
+        `Deseja excluir permanentemente o pedido ${order.order_number} (${order.customer_name})? Esta ação também remove eventuais lançamentos financeiros vinculados a ele.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingOrderId(order.id);
+    try {
+      const res = await fetch(`/api/admin/orders/${order.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        window.alert(data?.error || 'Não foi possível excluir o pedido.');
+        return;
+      }
+      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+    } catch {
+      window.alert('Erro de comunicação ao excluir pedido.');
+    } finally {
+      setDeletingOrderId(null);
     }
   };
 
@@ -443,6 +472,15 @@ export default function AdminOrdersPage() {
                             <Eye className="w-3 h-3" />
                             <span>Ver</span>
                           </Link>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrder(order)}
+                            disabled={deletingOrderId === order.id}
+                            title="Excluir pedido (apenas administrador)"
+                            className="inline-flex items-center gap-1 p-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-all disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
