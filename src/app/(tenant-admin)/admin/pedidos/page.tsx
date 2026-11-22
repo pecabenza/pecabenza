@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { useSystemDialog } from '@/components/ui/SystemDialogProvider';
 import {
   CanonicalOrderStatus,
   CanonicalPaymentStatus,
@@ -66,6 +67,7 @@ interface AdminOrderSummary {
 }
 
 export default function AdminOrdersPage() {
+  const { showAlert, showConfirm, showPrompt } = useSystemDialog();
   const [orders, setOrders] = useState<AdminOrderSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -93,13 +95,13 @@ export default function AdminOrdersPage() {
 
   const handleConfirmPayment = async (order: AdminOrderSummary) => {
     const methodLabel = PAYMENT_METHOD_LABELS[order.payment_method || 'pix'] || 'Pix';
-    if (
-      !window.confirm(
-        `Confirmar recebimento do pagamento (${methodLabel}) do pedido ${order.order_number} no valor de ${formatBrl(order.total_cents)}?`
-      )
-    ) {
-      return;
-    }
+    const confirmed = await showConfirm({
+      title: 'Confirmar pagamento',
+      message: `Confirmar recebimento do pagamento (${methodLabel}) do pedido ${order.order_number} no valor de ${formatBrl(order.total_cents)}?`,
+      confirmLabel: 'Confirmar pagamento',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed) return;
 
     setConfirmingPaymentId(order.id);
     try {
@@ -114,23 +116,42 @@ export default function AdminOrdersPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        window.alert(data?.error || 'Não foi possível confirmar o pagamento.');
+        await showAlert({
+          title: 'Erro ao confirmar pagamento',
+          message: data?.error || 'Não foi possível confirmar o pagamento.',
+          variant: 'error',
+        });
         return;
       }
       await fetchOrders();
     } catch {
-      window.alert('Erro de comunicação ao confirmar pagamento.');
+      await showAlert({
+        title: 'Erro de comunicação',
+        message: 'Erro de comunicação ao confirmar pagamento.',
+        variant: 'error',
+      });
     } finally {
       setConfirmingPaymentId(null);
     }
   };
 
   const handleDeleteOrder = async (order: AdminOrderSummary) => {
-    if (
-      !window.confirm(
-        `Deseja excluir permanentemente o pedido ${order.order_number} (${order.customer_name})? Esta ação também remove eventuais lançamentos financeiros vinculados a ele.`
-      )
-    ) {
+    const reason = await showPrompt({
+      title: `Excluir pedido ${order.order_number}`,
+      message: `Informe o motivo da exclusão do pedido ${order.order_number} (${order.customer_name}). Caso já esteja lançado no financeiro, o lançamento também será removido e este motivo ficará registrado na auditoria.`,
+      placeholder: 'Ex: Pedido de teste / Lançamento duplicado / Cancelado pelo cliente',
+      required: true,
+      confirmLabel: 'Excluir pedido',
+      cancelLabel: 'Cancelar',
+    });
+    if (!reason || reason.trim().length < 3) {
+      if (reason !== null) {
+        await showAlert({
+          title: 'Motivo obrigatório',
+          message: 'Informe um motivo com pelo menos 3 caracteres para excluir o pedido.',
+          variant: 'warning',
+        });
+      }
       return;
     }
 
@@ -138,15 +159,25 @@ export default function AdminOrdersPage() {
     try {
       const res = await fetch(`/api/admin/orders/${order.id}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason.trim() }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        window.alert(data?.error || 'Não foi possível excluir o pedido.');
+        await showAlert({
+          title: 'Erro ao excluir pedido',
+          message: data?.error || 'Não foi possível excluir o pedido.',
+          variant: 'error',
+        });
         return;
       }
       setOrders((prev) => prev.filter((o) => o.id !== order.id));
     } catch {
-      window.alert('Erro de comunicação ao excluir pedido.');
+      await showAlert({
+        title: 'Erro de comunicação',
+        message: 'Erro de comunicação ao excluir pedido.',
+        variant: 'error',
+      });
     } finally {
       setDeletingOrderId(null);
     }

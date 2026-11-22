@@ -19,6 +19,7 @@ import {
 import { formatBrl } from '@/modules/cart/cart.utils';
 import { PAYMENT_METHOD_LABELS } from '@/modules/orders/order-status.machine';
 import { DailyClosingPrintModal } from './DailyClosingPrintModal';
+import { useSystemDialog } from '@/components/ui/SystemDialogProvider';
 
 type AccountType = 'cash' | 'checking' | 'digital' | 'other';
 type EntryType = 'income' | 'expense';
@@ -57,10 +58,23 @@ interface PendingOrder {
   created_at: string;
 }
 
+interface DeletedOrderLog {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  totalCents: number;
+  financeEntriesRemoved: number;
+  financeRemovedCents: number;
+  reason: string;
+  createdAt: string;
+}
+
 interface DashboardData {
   accounts: FinanceAccount[];
   entries: FinanceEntry[];
   pendingPaymentOrders: PendingOrder[];
+  deletedOrderLogs?: DeletedOrderLog[];
   unsyncedPaidOrdersCount: number;
   summary: {
     totalIncomePaidCents: number;
@@ -121,6 +135,7 @@ function getDaysAgoIso(days: number): string {
 }
 
 export function FinanceDashboardClient() {
+  const { showConfirm } = useSystemDialog();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -354,7 +369,14 @@ export function FinanceDashboardClient() {
   };
 
   const handleDeleteEntry = async (entry: FinanceEntry) => {
-    if (!window.confirm(`Deseja excluir o lançamento "${entry.description}"?`)) return;
+    const confirmed = await showConfirm({
+      title: 'Excluir lançamento',
+      message: `Deseja excluir o lançamento "${entry.description}"?`,
+      variant: 'danger',
+      confirmLabel: 'Sim, excluir',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/admin/finance/${entry.id}`, { method: 'DELETE' });
       if (!res.ok) {
@@ -1011,6 +1033,48 @@ export function FinanceDashboardClient() {
           </table>
         </div>
       </div>
+
+      {data && data.deletedOrderLogs && data.deletedOrderLogs.length > 0 && (
+        <div className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-3.5 bg-stone-50 border-b border-stone-200 flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-stone-700">
+              Registro de Pedidos Excluídos (Auditoria)
+            </h2>
+            <span className="text-[11px] text-stone-500">
+              Últimas {data.deletedOrderLogs.length} exclusão(ões)
+            </span>
+          </div>
+          <div className="divide-y divide-stone-100">
+            {data.deletedOrderLogs.map((log) => (
+              <div
+                key={log.id}
+                className="px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+              >
+                <div>
+                  <span className="font-bold text-stone-900">{log.orderNumber}</span>
+                  <span className="text-stone-500"> · {log.customerName} · </span>
+                  <span className="text-stone-400">
+                    {new Date(log.createdAt).toLocaleString('pt-BR')}
+                  </span>
+                  <p className="text-stone-700 mt-0.5">
+                    <strong>Motivo:</strong> {log.reason}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="font-mono font-bold text-red-600 block">
+                    {formatBrl(log.totalCents)}
+                  </span>
+                  {log.financeEntriesRemoved > 0 && (
+                    <span className="text-[10px] text-stone-500">
+                      Estornado do financeiro ({formatBrl(log.financeRemovedCents)})
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <DailyClosingPrintModal
         isOpen={showDailyClosingModal}

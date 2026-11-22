@@ -352,6 +352,7 @@ export async function getFinanceDashboard(
     { data: pendingOrdersData },
     { data: paidOrdersData },
     { data: syncedOrderIdsData },
+    { data: deletedAuditData },
   ] = await Promise.all([
     entriesQuery,
     supabase
@@ -376,6 +377,13 @@ export async function getFinanceDashboard(
       .eq('tenant_id', tenantId)
       .eq('entry_type', 'income')
       .not('order_id', 'is', null),
+    supabase
+      .from('audit_logs')
+      .select('id, resource_id, payload_before, payload_after, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('action', 'ORDER_DELETED')
+      .order('created_at', { ascending: false })
+      .limit(20),
   ]);
 
   if (entriesErr) {
@@ -418,10 +426,23 @@ export async function getFinanceDashboard(
   const syncedSet = new Set((syncedOrderIdsData || []).map((x) => x.order_id));
   const unsyncedPaidOrdersCount = (paidOrdersData || []).filter((o) => !syncedSet.has(o.id)).length;
 
+  const deletedOrderLogs = (deletedAuditData || []).map((log: any) => ({
+    id: log.id as string,
+    orderId: log.resource_id as string,
+    orderNumber: (log.payload_before?.order_number as string) || '—',
+    customerName: (log.payload_before?.customer_name as string) || '—',
+    totalCents: Number(log.payload_before?.total_cents || 0),
+    financeEntriesRemoved: Number(log.payload_after?.finance_entries_removed || 0),
+    financeRemovedCents: Number(log.payload_after?.finance_removed_cents || 0),
+    reason: (log.payload_after?.reason as string) || 'Sem motivo registrado',
+    createdAt: log.created_at as string,
+  }));
+
   return {
     accounts: accountsWithBalance,
     entries,
     pendingPaymentOrders: pendingOrdersData || [],
+    deletedOrderLogs,
     unsyncedPaidOrdersCount,
     summary: {
       totalIncomePaidCents,

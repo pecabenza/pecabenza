@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuthSession } from '@/lib/tenancy/admin-auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sanitizePlainText } from '@/lib/security/sanitize';
 import { logger } from '@/lib/observability/logger';
 import { getAdminOrder } from '@/modules/orders/orders.service';
 
@@ -53,6 +54,15 @@ export async function DELETE(
       return NextResponse.json({ error: 'ID do pedido é obrigatório.' }, { status: 400 });
     }
 
+    const body = await request.json().catch(() => ({}));
+    const cleanReason = sanitizePlainText(typeof body?.reason === 'string' ? body.reason : '').trim();
+    if (cleanReason.length < 3) {
+      return NextResponse.json(
+        { error: 'Informe o motivo da exclusão (mínimo 3 caracteres).' },
+        { status: 400 }
+      );
+    }
+
     const adminClient = createAdminClient();
 
     const { data: existing, error: findErr } = await adminClient
@@ -66,27 +76,24 @@ export async function DELETE(
       return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 });
     }
 
-    // Remove eventual lançamento financeiro vinculado ao pedido excluído
-    try {
-      await adminClient
-        .from('finance_entries')
-        .delete()
-        .eq('tenant_id', session.tenant.id)
-        .eq('order_id', orderId);
-    } catch {
-      // ignora se tabela ainda não existir
-    }
-
-    const { error: delErr } = await adminClient
-      .from('orders')
-      .delete()
-      .eq('tenant_id', session.tenant.id)
-      .eq('id', orderId);
+    const { data: rpcResult, error: delErr } = await adminClient.rpc('admin_delete_order_atomic', {
+      p_tenant_id: session.tenant.id,
+      p_order_id: orderId,
+      p_actor_user_id: session.user.id,
+      p_reason: cleanReason,
+    });
 
     if (delErr) {
       return NextResponse.json(
         { error: `Não foi possível excluir o pedido: ${delErr.message}` },
         { status: 400 }
+      );
+    }
+
+    if (rpcResult && rpcResult.success === false) {
+      return NextResponse.json(
+        { error: rpcResult.error || 'Não foi possível excluir o pedido.' },
+        { status: 404 }
       );
     }
 

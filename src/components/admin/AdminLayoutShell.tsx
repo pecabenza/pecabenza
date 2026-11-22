@@ -27,8 +27,10 @@ import {
   Wallet,
   Maximize2,
   Minimize2,
+  Power,
 } from 'lucide-react';
 import type { TenantRole } from '@/types/database.types';
+import { useSystemDialog } from '@/components/ui/SystemDialogProvider';
 
 interface AdminLayoutShellProps {
   tenantName: string;
@@ -47,12 +49,65 @@ export function AdminLayoutShell({
   sidebarColor,
   children,
 }: AdminLayoutShellProps) {
+  const { showConfirm } = useSystemDialog();
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isStoreOpen, setIsStoreOpen] = useState<boolean | null>(null);
+  const [enforceSchedule, setEnforceSchedule] = useState(false);
+  const [togglingStore, setTogglingStore] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/admin/store-status', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data && typeof data.isStoreOpen === 'boolean') {
+          setIsStoreOpen(data.isStoreOpen);
+          setEnforceSchedule(Boolean(data.enforceSchedule));
+        }
+      })
+      .catch(() => {
+        // silencioso
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleToggleStoreStatus = async () => {
+    if (isStoreOpen === null || togglingStore) return;
+    const nextState = !isStoreOpen;
+    if (!nextState) {
+      const confirmed = await showConfirm({
+        title: 'Pausar pedidos online',
+        message:
+          'Deseja pausar os pedidos online agora? Clientes verão a loja como pausada até você reabrir.',
+        variant: 'warning',
+        confirmLabel: 'Sim, pausar loja',
+        cancelLabel: 'Cancelar',
+      });
+      if (!confirmed) return;
+    }
+    setTogglingStore(true);
+    try {
+      const res = await fetch('/api/admin/store-status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isStoreOpen: nextState }),
+      });
+      if (res.ok) {
+        setIsStoreOpen(nextState);
+      }
+    } catch {
+      // ignora erro transitório
+    } finally {
+      setTogglingStore(false);
+    }
+  };
 
   useEffect(() => {
     const handleFsChange = () => {
@@ -254,7 +309,33 @@ export function AdminLayoutShell({
 
       {/* Main Content */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto relative">
-        <div className="flex justify-end mb-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
+          {isStoreOpen !== null && (
+            <button
+              type="button"
+              onClick={handleToggleStoreStatus}
+              disabled={togglingStore}
+              title={
+                isStoreOpen
+                  ? 'Clique para pausar as vendas online'
+                  : 'Clique para abrir as vendas online'
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold shadow-sm transition-colors disabled:opacity-60 ${
+                isStoreOpen
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                  : 'bg-red-50 border-red-200 text-red-800 hover:bg-red-100'
+              }`}
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span>
+                {togglingStore
+                  ? 'Atualizando...'
+                  : isStoreOpen
+                  ? `Loja Aberta${enforceSchedule ? ' (Horário Auto)' : ''}`
+                  : 'Loja Pausada · Abrir'}
+              </span>
+            </button>
+          )}
           <button
             type="button"
             onClick={toggleFullscreen}
