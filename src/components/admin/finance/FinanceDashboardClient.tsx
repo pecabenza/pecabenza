@@ -14,9 +14,11 @@ import {
   Trash2,
   AlertTriangle,
   Sparkles,
+  Printer,
 } from 'lucide-react';
 import { formatBrl } from '@/modules/cart/cart.utils';
 import { PAYMENT_METHOD_LABELS } from '@/modules/orders/order-status.machine';
+import { DailyClosingPrintModal } from './DailyClosingPrintModal';
 
 type AccountType = 'cash' | 'checking' | 'digital' | 'other';
 type EntryType = 'income' | 'expense';
@@ -154,6 +156,7 @@ export function FinanceDashboardClient() {
   const [confirmingOrderId, setConfirmingOrderId] = useState<string | null>(null);
   const [orderTargetAccounts, setOrderTargetAccounts] = useState<Record<string, string>>({});
   const [syncingOrders, setSyncingOrders] = useState(false);
+  const [showDailyClosingModal, setShowDailyClosingModal] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -381,6 +384,14 @@ export function FinanceDashboardClient() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowDailyClosingModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-stone-900 text-white text-xs font-semibold hover:bg-stone-800"
+          >
+            <Printer className="w-4 h-4" />
+            Imprimir Fechamento do Dia
+          </button>
           <button
             type="button"
             onClick={() => handleOpenEntryForm('income')}
@@ -1000,6 +1011,12 @@ export function FinanceDashboardClient() {
           </table>
         </div>
       </div>
+
+      <DailyClosingPrintModal
+        isOpen={showDailyClosingModal}
+        initialDate={startDate === endDate ? startDate : getTodayIso()}
+        onClose={() => setShowDailyClosingModal(false)}
+      />
     </div>
   );
 }
