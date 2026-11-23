@@ -11,6 +11,7 @@ import {
   Truck,
   CreditCard,
   MessageCircle,
+  Printer,
 } from 'lucide-react';
 import type {
   StructuredBusinessHours,
@@ -25,9 +26,10 @@ import { StoreOperationsTab } from '@/components/admin/store-config/StoreOperati
 import { StoreDeliveryPricingTab } from '@/components/admin/store-config/StoreDeliveryPricingTab';
 import { StorePaymentsTab } from '@/components/admin/store-config/StorePaymentsTab';
 import { StoreCommunicationTab } from '@/components/admin/store-config/StoreCommunicationTab';
+import { StorePrintTab } from '@/components/admin/store-config/StorePrintTab';
 import { DistanceBandsEditor } from '@/components/admin/DistanceBandsEditor';
 
-type AdminStoreTab = 'operations' | 'delivery' | 'payments' | 'communication';
+type AdminStoreTab = 'operations' | 'delivery' | 'payments' | 'communication' | 'print';
 
 export default function LojaConfigPage() {
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,8 @@ export default function LojaConfigPage() {
   const [pgWebhookSecret, setPgWebhookSecret] = useState('');
   const [saveGatewayCreds, setSaveGatewayCreds] = useState(false);
   const [tenantId, setTenantId] = useState<string>('');
+  const [tenantLogoUrl, setTenantLogoUrl] = useState<string | null>(null);
+  const [tenantNameLabel, setTenantNameLabel] = useState<string>('BENZA');
   const [testingAsaasMode, setTestingAsaasMode] = useState<'connection' | 'webhook' | null>(null);
   const [asaasTestResult, setAsaasTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [copiedWebhookUrl, setCopiedWebhookUrl] = useState(false);
@@ -78,7 +82,16 @@ export default function LojaConfigPage() {
 
       setSiteMode(data.tenant?.site_mode || 'prelaunch');
       if (data.tenant?.id) setTenantId(data.tenant.id);
+      if (data.tenant?.name) setTenantNameLabel(data.tenant.name);
       setReadiness(data.readiness || null);
+
+      fetch('/api/admin/print-settings', { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((ps) => {
+          if (ps?.logoUrl) setTenantLogoUrl(ps.logoUrl);
+          if (ps?.tenantName) setTenantNameLabel(ps.tenantName);
+        })
+        .catch(() => {});
 
       const cs = data.commerceSettings;
       setDeliveryEnabled(Boolean(cs.delivery_enabled));
@@ -323,6 +336,7 @@ export default function LojaConfigPage() {
     { id: 'delivery', label: 'Entregas & Frete', icon: Truck },
     { id: 'payments', label: 'Pagamentos & Pix', icon: CreditCard },
     { id: 'communication', label: 'Comunicação & QR', icon: MessageCircle },
+    { id: 'print', label: 'Impressão', icon: Printer },
   ];
 
   return (
@@ -531,6 +545,18 @@ export default function LojaConfigPage() {
       {activeTab === 'communication' && (
         <StoreCommunicationTab
           businessHours={businessHours}
+          onChangeBusinessHours={(next) => {
+            setBusinessHours(next);
+            markDirty();
+          }}
+        />
+      )}
+
+      {activeTab === 'print' && (
+        <StorePrintTab
+          businessHours={businessHours}
+          logoUrl={tenantLogoUrl}
+          tenantName={tenantNameLabel}
           onChangeBusinessHours={(next) => {
             setBusinessHours(next);
             markDirty();

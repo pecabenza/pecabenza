@@ -3,6 +3,19 @@ import { parseCouponCampaigns, type CouponCampaign } from './coupon.engine';
 
 export type StorePaymentOption = 'pix' | 'card_online' | 'cash' | 'card_on_delivery';
 export type WeekdayKey = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
+export type PrintPaperWidthOption = '58mm' | '70mm' | '75mm' | '80mm';
+
+export interface ThermalPrintSettings {
+  default_paper_width: PrintPaperWidthOption;
+  show_logo_on_top: boolean;
+  footer_note: string;
+}
+
+export const DEFAULT_PRINT_SETTINGS: ThermalPrintSettings = {
+  default_paper_width: '75mm',
+  show_logo_on_top: false,
+  footer_note: 'Não é documento fiscal',
+};
 
 export interface DaySchedule {
   open: string;   // HH:MM
@@ -39,6 +52,7 @@ export interface StructuredBusinessHours {
   entregas?: string;
   delivered_thank_you_message?: string;
   coupon_campaigns?: CouponCampaign[];
+  print_settings?: ThermalPrintSettings;
   whatsapp_templates?: {
     confirmed?: string;
     ready?: string;
@@ -108,6 +122,21 @@ export function parseStructuredBusinessHours(raw?: Record<string, any> | null): 
         ? obj.delivered_thank_you_message.trim()
         : undefined,
     coupon_campaigns: parseCouponCampaigns(obj.coupon_campaigns),
+    print_settings: {
+      default_paper_width:
+        obj.print_settings?.default_paper_width === '58mm' ||
+        obj.print_settings?.default_paper_width === '70mm' ||
+        obj.print_settings?.default_paper_width === '75mm' ||
+        obj.print_settings?.default_paper_width === '80mm'
+          ? obj.print_settings.default_paper_width
+          : DEFAULT_PRINT_SETTINGS.default_paper_width,
+      show_logo_on_top: Boolean(obj.print_settings?.show_logo_on_top),
+      footer_note:
+        typeof obj.print_settings?.footer_note === 'string' &&
+        obj.print_settings.footer_note.trim().length > 0
+          ? obj.print_settings.footer_note.trim()
+          : DEFAULT_PRINT_SETTINGS.footer_note,
+    },
     whatsapp_templates:
       obj.whatsapp_templates && typeof obj.whatsapp_templates === 'object'
         ? {

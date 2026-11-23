@@ -46,6 +46,13 @@ const SaveStoreConfigSchema = z.object({
     producao: z.string().max(120).optional(),
     entregas: z.string().max(120).optional(),
     delivered_thank_you_message: z.string().max(600).optional(),
+    print_settings: z
+      .object({
+        default_paper_width: z.enum(['58mm', '70mm', '75mm', '80mm']).default('75mm'),
+        show_logo_on_top: z.boolean().default(false),
+        footer_note: z.string().max(200).default('Não é documento fiscal'),
+      })
+      .optional(),
     whatsapp_templates: z
       .object({
         confirmed: z.string().max(1500).optional(),
@@ -113,6 +120,15 @@ export async function POST(request: NextRequest) {
             : null,
           delivered_thank_you_message: data.businessHours.delivered_thank_you_message
             ? sanitizePlainText(data.businessHours.delivered_thank_you_message)
+            : undefined,
+          print_settings: data.businessHours.print_settings
+            ? {
+                default_paper_width: data.businessHours.print_settings.default_paper_width,
+                show_logo_on_top: Boolean(data.businessHours.print_settings.show_logo_on_top),
+                footer_note:
+                  sanitizePlainText(data.businessHours.print_settings.footer_note || '') ||
+                  'Não é documento fiscal',
+              }
             : undefined,
         },
       },

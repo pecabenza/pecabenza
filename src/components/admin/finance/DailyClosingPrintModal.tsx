@@ -10,6 +10,7 @@ const PAPER_WIDTH_STORAGE_KEY = 'benza_print_paper_width';
 const PRINTABLE_WIDTH_MAP: Record<ThermalPaperWidth, string> = {
   '58mm': '52mm',
   '70mm': '66mm',
+  '75mm': '70mm',
   '80mm': '72mm',
 };
 
@@ -54,26 +55,53 @@ export function DailyClosingPrintModal({
   initialDate,
   onClose,
 }: DailyClosingPrintModalProps) {
-  const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('70mm');
+  const [paperWidth, setPaperWidth] = useState<ThermalPaperWidth>('75mm');
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [summary, setSummary] = useState<DailyClosingSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLogoOnTop, setShowLogoOnTop] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [footerNote, setFooterNote] = useState('Não é documento fiscal');
 
   useEffect(() => {
     setSelectedDate(initialDate);
   }, [initialDate, isOpen]);
 
   useEffect(() => {
+    let savedWidth: ThermalPaperWidth | null = null;
     try {
       const saved = window.localStorage.getItem(PAPER_WIDTH_STORAGE_KEY) as ThermalPaperWidth | null;
-      if (saved === '58mm' || saved === '70mm' || saved === '80mm') {
+      if (saved === '58mm' || saved === '70mm' || saved === '75mm' || saved === '80mm') {
+        savedWidth = saved;
         setPaperWidth(saved);
       }
     } catch {
       // ignora
     }
-  }, []);
+
+    if (!isOpen) return;
+    let active = true;
+    fetch('/api/admin/print-settings', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (data.logoUrl) setLogoUrl(data.logoUrl);
+        if (data.printSettings) {
+          setShowLogoOnTop(Boolean(data.printSettings.show_logo_on_top));
+          if (data.printSettings.footer_note) {
+            setFooterNote(data.printSettings.footer_note);
+          }
+          if (!savedWidth && data.printSettings.default_paper_width) {
+            setPaperWidth(data.printSettings.default_paper_width);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !selectedDate) return;
@@ -153,7 +181,7 @@ export function DailyClosingPrintModal({
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-200/70 text-xs">
             <div className="flex items-center gap-1 bg-stone-200/70 p-1 rounded-lg">
-              {(['58mm', '70mm', '80mm'] as ThermalPaperWidth[]).map((w) => (
+              {(['58mm', '70mm', '75mm', '80mm'] as ThermalPaperWidth[]).map((w) => (
                 <button
                   key={w}
                   type="button"
@@ -198,14 +226,26 @@ export function DailyClosingPrintModal({
                   ? 'w-[220px] text-[11px]'
                   : paperWidth === '70mm'
                   ? 'w-[264px] text-xs'
+                  : paperWidth === '75mm'
+                  ? 'w-[282px] text-xs'
                   : 'w-[302px] text-xs'
               }`}
             >
               {/* Cabeçalho */}
               <div className="text-center border-b-2 border-dashed border-black pb-2.5 mb-2.5">
-                <div className="font-black uppercase tracking-wider text-sm">
-                  {summary.tenantName}
-                </div>
+                {showLogoOnTop && logoUrl ? (
+                  <div className="flex justify-center mb-1">
+                    <img
+                      src={logoUrl}
+                      alt={summary.tenantName}
+                      className="h-10 w-auto max-w-[160px] object-contain brightness-0"
+                    />
+                  </div>
+                ) : (
+                  <div className="font-black uppercase tracking-wider text-sm">
+                    {summary.tenantName}
+                  </div>
+                )}
                 <div className="font-black text-xs mt-1 uppercase">
                   FECHAMENTO DE VENDAS DO DIA
                 </div>
@@ -318,6 +358,11 @@ export function DailyClosingPrintModal({
               <div className="text-center text-[10px] space-y-0.5">
                 <div className="font-bold">{summary.tenantName} • Fechamento</div>
                 <div>Impresso em {new Date().toLocaleString('pt-BR')}</div>
+                {footerNote && (
+                  <div className="font-black uppercase pt-1 border-t border-dotted border-black mt-1">
+                    {footerNote}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
